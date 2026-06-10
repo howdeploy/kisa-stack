@@ -37,6 +37,9 @@
 
 - [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave) — Мой пайплайн обработки заметок Obsidian: enrich/atomize по Zettelkasten, импорт .docx и ведение LLM Wiki (`wiki_init` / `wiki_ingest` / `wiki_compile` / `wiki_lint`; единственный writer — `vault_writer.py`). Тот самый контур долговременной памяти, который якорят хуки из [global-config](global-config) — вики как source of truth, а не авто-заметки. В комплекте — скилл-адаптер для Claude Code.
 
+- [Agentation](https://github.com/benjitaylor/agentation) — Визуальный фидбек для агентов: кликаешь по элементу на странице, пишешь заметку — и агент получает структурный вывод (CSS-селектор, путь к исходнику, дерево React-компонентов) вместо описания «синяя кнопка в сайдбаре». Со второй версии — MCP-интеграция: агент видит аннотации напрямую, уточняет и помечает их решенными. У меня это QA-звено web-dev-пайплайна. Документация: [agentation.com](https://www.agentation.com).
+- [Remotion](https://github.com/remotion-dev/remotion) — Программные видео в React: композиция — это компонент, анимация — код, рендер из CLI. Весь моушн для роликов делаю на нем: сцены версионируются в git, а Claude Code пишет и правит видео как обычный код. В моей вики под Remotion отдельный спейс с паттернами анимаций, аудио-стеком и настройками рендера под YouTube.
+
 ## Фразы кабанчика
 
 - [claude-code-spinner](https://github.com/i1kazantsev/claude-code-spinner) — «Замена фраз спиннера клод-кода для уважаемых вайбкодеров»: вместо `Thinking...` / `Pondering...` крутится «Обкашляю вопросик», «По красоте все сделаем» и еще 90+ фраз. Технически это не плагин, а пак `spinnerVerbs`, который вливается в `~/.claude/settings.json` (командой `/install-spinner` из репо или руками). Бонусом — Stop-хук «Вопросик на тормозах» со звуком.

@@ -54,7 +54,7 @@
 
 ## Плагины
 
-Мой набор плагинов Claude Code со ссылками, описаниями и шпаргалкой по установке — в [plugins.md](plugins.md). Там же — наборы и тулзы вне маркетплейса (gstack, gsd-core, rtk, мой пайплайн [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave)), «фразы кабанчика» и мой [MTGA](https://github.com/howdeploy/MTGA) (Claude отвечает как трамповские твиты, TREMENDOUS!).
+Мой набор плагинов Claude Code со ссылками, описаниями и шпаргалкой по установке — в [plugins.md](plugins.md). Там же — наборы и тулзы вне маркетплейса (gstack, gsd-core, rtk, Agentation, Remotion, мой пайплайн [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave)), «фразы кабанчика» и мой [MTGA](https://github.com/howdeploy/MTGA) (Claude отвечает как трамповские твиты, TREMENDOUS!).
 
 ## Установка
 
