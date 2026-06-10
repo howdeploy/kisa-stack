@@ -1,0 +1,10 @@
+# Локальные настройки сессии Claude Code
+.claude/settings.local.json
+
+# Секреты
+.env
+
+# Кэши и артефакты
+__pycache__/
+node_modules/
+*.pyc

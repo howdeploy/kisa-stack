@@ -1,0 +1,4 @@
+interface:
+  display_name: "Researcher"
+  short_description: "Гибкий signal-only ресёрч: quick-scan и deep-research с фолбэками."
+  default_prompt: "Проведи ресёрч по теме пользователя по правилам SKILL.md: выбери режим quick-scan или deep-research, собери сильные источники, отсеки мусор, ответь paragraph-first с источниками."

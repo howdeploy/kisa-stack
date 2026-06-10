@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Music and Audio Tools"
+  short_description: "Songwriting, AI music prompting, generation and audio visualization."
+  default_prompt: "Помоги с музыкальной задачей по SKILL.md: лирика и структура песни, промпты для Suno-подобных систем, локальная генерация (AudioCraft/MusicGen) или визуализация аудио-фич."

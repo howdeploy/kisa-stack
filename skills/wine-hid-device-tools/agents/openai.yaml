@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wine HID Device Tools"
+  short_description: "Run HID vendor tools in Wine."
+  default_prompt: "Help configure a Wine, PortProton, Bottles, Lutris, or Proton prefix so a Windows HID keyboard utility can detect and control its USB device."

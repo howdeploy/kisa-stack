@@ -1,0 +1,4 @@
+interface:
+  display_name: "Suno Music"
+  short_description: "Генерация музыки и voiceover-safe фонов через EvoLink Suno API."
+  default_prompt: "Сгенерируй трек по запросу пользователя через scripts/generate.py по правилам SKILL.md. Для фона под озвучку строй промпт вокруг функции трека (underscore, no vocals, no strong melody)."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ElevenLabs Living Voice"
+  short_description: "Make ElevenLabs speech sound alive: text shaping + voice settings."
+  default_prompt: "Подготовь текст под живую озвучку ElevenLabs по правилам SKILL.md (v2/v3 split, дыхательные блоки, паузы, audio tags) или преврати фидбек пользователя в правку voice settings."

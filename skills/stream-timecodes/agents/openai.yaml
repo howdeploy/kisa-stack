@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stream Timecodes"
+  short_description: "Генерация 18 таймкодов для стрима/подкаста из VTT-транскрипции."
+  default_prompt: "Пользователь прислал VTT-файл. Обработай его через scripts/process_vtt.py и собери 18 таймкодов по правилам SKILL.md (без буквы ё, равномерно по длительности)."

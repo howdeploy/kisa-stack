@@ -1,0 +1,4 @@
+interface:
+  display_name: "CSS Graphics"
+  short_description: "Generate CSS/SVG graphics rendered to PNG/JPG via Puppeteer."
+  default_prompt: "Создай графику по описанию пользователя: напиши HTML/CSS/SVG по правилам SKILL.md и отрендери в PNG через scripts/render.js."
