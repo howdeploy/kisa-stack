@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Установка скиллов в Claude Code (~/.claude/skills), Codex (~/.codex/skills)
 # и/или Hermes (~/.hermes/skills). Скиллы взаимно совместимы: один и тот же
-# SKILL.md работает во всех трёх рантаймах.
+# SKILL.md работает во всех трех рантаймах.
 #
 # Использование:
 #   ./install.sh <skill-name|all> [--claude] [--codex] [--hermes]

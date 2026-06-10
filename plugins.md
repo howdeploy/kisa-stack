@@ -25,18 +25,20 @@
 ## Установлены, но выключены
 
 - [ccproxy-tools](https://github.com/fcakyon/claude-codex-settings) — Claude Code поверх кредитов GitHub Copilot, Gemini API, локальных ollama-моделей или любого LLM. *(маркетплейс `claude-settings`)*
-- [claudecode-sounds](https://github.com/newink/codingagents) — Звуковые уведомления, когда Claude Code ждёт твоего внимания. *(маркетплейс `codingagents`)*
+- [claudecode-sounds](https://github.com/newink/codingagents) — Звуковые уведомления, когда Claude Code ждет твоего внимания. *(маркетплейс `codingagents`)*
 
 ## Наборы и тулзы вне маркетплейса
 
 Ставятся не через `/plugin install`, а своими установщиками.
 
 - [gstack](https://github.com/garrytan/gstack) — Сетап Garry Tan для Claude Code: большой набор скиллов — code review и QA с реальным браузером, design-пайплайны, plan-ревью (CEO / eng / design / DX), second opinion от Codex, ship/deploy-воркфлоу. Ставится одной вставкой в Claude Code (нужен Bun). Основа моего скиллового стека.
-- [gsd-core](https://github.com/open-gsd/gsd-core) — Git. Ship. Done: spec-driven фреймворк фазовой разработки с context engineering — тяжёлый ресерч, планирование и исполнение уходят в fresh-context сабагентов, основная сессия остаётся чистой. Мульти-рантайм (Claude Code, Codex, Gemini CLI, Cursor и др.), установка: `npx @opengsd/gsd-core@latest`. *(Переименованный Redux — форк комьюнити после скандала с автором оригинального GSD.)* У меня живёт в Codex (`gsd-*` команды).
-- [rtk](https://github.com/rtk-ai/rtk) — RTK (Rust Token Killer): CLI-прокси, который фильтрует и сжимает вывод команд до попадания в контекст LLM — экономия 60–90% токенов. Один Rust-бинарь, 100+ поддержанных команд, <10 мс оверхеда. Интеграции: Claude Code (PreToolUse-хук, `rtk init -g`), Codex (`rtk init -g --codex` → AGENTS.md + RTK.md — у меня подключён именно так), Cursor, Gemini CLI и др.
+- [gsd-core](https://github.com/open-gsd/gsd-core) — Git. Ship. Done: spec-driven фреймворк фазовой разработки с context engineering — тяжелый ресерч, планирование и исполнение уходят в fresh-context сабагентов, основная сессия остается чистой. Мульти-рантайм (Claude Code, Codex, Gemini CLI, Cursor и др.), установка: `npx @opengsd/gsd-core@latest`. *(Переименованный Redux — форк комьюнити после скандала с автором оригинального GSD.)* У меня живет в Codex (`gsd-*` команды).
+- [rtk](https://github.com/rtk-ai/rtk) — RTK (Rust Token Killer): CLI-прокси, который фильтрует и сжимает вывод команд до попадания в контекст LLM — экономия 60–90% токенов. Один Rust-бинарь, 100+ поддержанных команд, <10 мс оверхеда. Интеграции: Claude Code (PreToolUse-хук, `rtk init -g`), Codex (`rtk init -g --codex` → AGENTS.md + RTK.md — у меня подключен именно так), Cursor, Gemini CLI и др.
+
+- [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave) — Мой пайплайн обработки заметок Obsidian: enrich/atomize по Zettelkasten, импорт .docx и ведение LLM Wiki (`wiki_init` / `wiki_ingest` / `wiki_compile` / `wiki_lint`; единственный writer — `vault_writer.py`). Тот самый контур долговременной памяти, который якорят хуки из [global-config](global-config) — вики как source of truth, а не авто-заметки. В комплекте — скилл-адаптер для Claude Code.
 
 ## Фразы кабанчика
 
-- [claude-code-spinner](https://github.com/i1kazantsev/claude-code-spinner) — «Замена фраз спиннера клод-кода для уважаемых вайбкодеров»: вместо `Thinking...` / `Pondering...` крутится «Обкашляю вопросик», «По красоте все сделаем» и ещё 90+ фраз. Технически это не плагин, а пак `spinnerVerbs`, который вливается в `~/.claude/settings.json` (командой `/install-spinner` из репо или руками). Бонусом — Stop-хук «Вопросик на тормозах» со звуком.
+- [claude-code-spinner](https://github.com/i1kazantsev/claude-code-spinner) — «Замена фраз спиннера клод-кода для уважаемых вайбкодеров»: вместо `Thinking...` / `Pondering...` крутится «Обкашляю вопросик», «По красоте все сделаем» и еще 90+ фраз. Технически это не плагин, а пак `spinnerVerbs`, который вливается в `~/.claude/settings.json` (командой `/install-spinner` из репо или руками). Бонусом — Stop-хук «Вопросик на тормозах» со звуком.
 
 > ⚠️ Автор предупреждает: единственный официальный источник — `github.com/i1kazantsev/claude-code-spinner`, существуют вредоносные копии проекта.

@@ -36,7 +36,7 @@
 
    В `wiki-anchor.sh` укажите путь к своему vault (переменная `WIKI_VAULT` в начале файла). В `wiki-reminder.sh` при желании дополните фильтр директорий, где напоминание не нужно.
 
-4. **Подключение хуков.** Перенесите блок `hooks` (и `autoMemoryEnabled`, если ведёте память в вики, а не в авто-памяти Claude Code) из `settings.hooks.example.json` в свой `~/.claude/settings.json`. После правки перезапустите Claude Code.
+4. **Подключение хуков.** Перенесите блок `hooks` (и `autoMemoryEnabled`, если ведете память в вики, а не в авто-памяти Claude Code) из `settings.hooks.example.json` в свой `~/.claude/settings.json`. После правки перезапустите Claude Code.
 
 ## Как это работает
 

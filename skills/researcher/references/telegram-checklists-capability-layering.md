@@ -1,6 +1,6 @@
 # Telegram checklists vs Hermes vs skills
 
-Короткая опорная заметка для capability-ресёрча по Telegram/Hermes.
+Короткая опорная заметка для capability-ресерча по Telegram/Hermes.
 
 ## Проверочная рамка
 Разделяй 4 слоя:

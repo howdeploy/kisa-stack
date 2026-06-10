@@ -1,4 +1,4 @@
 interface:
   display_name: "Telegram Chat Wiki"
   short_description: "Превращает экспорт Telegram-переписки в двухслойную wiki-память."
-  default_prompt: "Пользователь прислал архив Telegram-чата. Разложи его в wiki по схеме SKILL.md: raw day-chunks по датам + hub-страница собеседника с темами, проектами и договорённостями."
+  default_prompt: "Пользователь прислал архив Telegram-чата. Разложи его в wiki по схеме SKILL.md: raw day-chunks по датам + hub-страница собеседника с темами, проектами и договоренностями."
