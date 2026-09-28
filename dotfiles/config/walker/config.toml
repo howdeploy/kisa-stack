@@ -1,0 +1,52 @@
+theme = "shoji"
+force_keyboard_focus = false
+click_to_close = false
+hide_quick_activation = true
+hide_action_hints = true
+actions_as_menu = true
+
+# Keep the Wayland surface the size of the visible menu.
+[shell]
+anchor_top = false
+anchor_bottom = false
+anchor_left = false
+anchor_right = false
+
+[providers]
+default = ["desktopapplications", "files", "providerlist"]
+empty = ["providerlist"]
+
+[[providers.prefixes]]
+prefix = "/"
+provider = "files"
+
+[[providers.prefixes]]
+prefix = ";"
+provider = "providerlist"
+
+[placeholders]
+default = { input = "Найти приложение, файл или папку…", list = "Ничего не найдено" }
+desktopapplications = { input = "Найти приложение…", list = "Приложения не найдены" }
+files = { input = "Найти файл или папку…", list = "Файлы не найдены" }
+providerlist = { input = "Выбрать раздел…", list = "Разделы не найдены" }
+
+[providers.actions]
+fallback = [
+  { action = "menus:open", label = "Открыть", after = "Nothing" },
+  { action = "menus:default", label = "Выполнить", after = "Close" },
+  { action = "menus:parent", label = "Назад", bind = "Escape", after = "Nothing" },
+]
+providerlist = [
+  { action = "activate", label = "Открыть", default = true, bind = "Return", after = "ClearReload" },
+]
+desktopapplications = [
+  { action = "start", label = "Открыть", default = true, bind = "Return" },
+  { action = "pin", label = "Закрепить", bind = "ctrl p", after = "AsyncReload" },
+  { action = "unpin", label = "Открепить", bind = "ctrl p", after = "AsyncReload" },
+]
+files = [
+  { action = "open", label = "Открыть", default = true, bind = "Return" },
+  { action = "opendir", label = "Открыть папку", bind = "ctrl Return" },
+  { action = "copypath", label = "Копировать путь", bind = "ctrl shift c" },
+  { action = "refresh_index", label = "Обновить поиск", bind = "ctrl r", after = "AsyncReload" },
+]

@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=Shoji
+Comment=SVG overrides on Papirus Dark
+Inherits=Papirus-Dark,breeze-dark,hicolor
+Directories=scalable/apps
+
+[scalable/apps]
+Size=48
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Applications

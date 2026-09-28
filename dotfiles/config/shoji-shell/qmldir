@@ -1,0 +1,40 @@
+singleton Theme 1.0 Theme.qml
+singleton Settings 1.0 Settings.qml
+singleton Services 1.0 Services.qml
+singleton Notifications 1.0 Notifications.qml
+singleton Dock 1.0 Dock.qml
+UiText 1.0 UiText.qml
+ActionButton 1.0 ActionButton.qml
+Meter 1.0 Meter.qml
+NotificationCard 1.0 NotificationCard.qml
+NotificationCentre 1.0 NotificationCentre.qml
+ControlCentre 1.0 ControlCentre.qml
+DeviceRow 1.0 DeviceRow.qml
+DeviceList 1.0 DeviceList.qml
+ScreenShell 1.0 ScreenShell.qml
+singleton Media 1.0 Media.qml
+singleton Osd 1.0 Osd.qml
+singleton Keyboard 1.0 Keyboard.qml
+PanelSlider 1.0 PanelSlider.qml
+PanelIcon 1.0 PanelIcon.qml
+ConnectionTile 1.0 ConnectionTile.qml
+StatCard 1.0 StatCard.qml
+Brightness 1.0 Brightness.qml
+singleton Wallpapers 1.0 Wallpapers.qml
+singleton WidgetLayouts 1.0 WidgetLayouts.qml
+WallpaperScreen 1.0 WallpaperScreen.qml
+WallpaperPicker 1.0 WallpaperPicker.qml
+WallpaperTransition 1.0 WallpaperTransition.qml
+WidgetWaveLoader 1.0 WidgetWaveLoader.qml
+WidgetWaveMask 1.0 WidgetWaveMask.qml
+WidgetWaveSnapshot 1.0 WidgetWaveSnapshot.qml
+AiLimitsWidget 1.0 AiLimitsWidget.qml
+MusicWidget 1.0 MusicWidget.qml
+WeatherWidget 1.0 WeatherWidget.qml
+GrainSurface 1.0 GrainSurface.qml
+VastWidget 1.0 VastWidget.qml
+HermesHud 1.0 HermesHud.qml
+WidgetSurface 1.0 WidgetSurface.qml
+GithubWidget 1.0 GithubWidget.qml
+NekoWidget 1.0 NekoWidget.qml
+SessionResumeWidget 1.0 SessionResumeWidget.qml

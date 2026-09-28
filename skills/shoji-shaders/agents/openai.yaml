@@ -1,0 +1,4 @@
+interface:
+  display_name: "Shoji Shader Workshop"
+  short_description: "Design ShojiWM and Quickshell shader transitions"
+  default_prompt: "Use $shoji-shaders to adapt a visual reference into a desktop effect."

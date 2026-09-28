@@ -6,6 +6,8 @@
 
 ## Contents
 
+- [Desktop dotfiles](dotfiles/): ShojiWM, Quickshell, Walker, shaders and portable setup
+
 - [Глобальный конфиг](#глобальный-конфиг)
 - [Основной стек](#основной-стек)
 - [Скиллы](#скиллы)
@@ -55,6 +57,9 @@
 - [ai-music-and-audio-tools](skills/ai-music-and-audio-tools) - Зонтик по AI-музыке: лирика и структура песен, промптинг Suno-подобных систем, локальная генерация (AudioCraft/MusicGen), спектрограммы.
 
 ### Система и железо
+
+- [shojiwm](skills/shojiwm) — configure the KISA desktop and understand its compositor, shell and launcher.
+- [shoji-shaders](skills/shoji-shaders) — create ShojiWM and Quickshell effects from visual references.
 
 - [wine-hid-device-tools](skills/wine-hid-device-tools) - Запуск Windows-утилит для HID-клавиатур под Wine/PortProton/Bottles: диагностика hidraw, udev-правила, winebus-реестр — вместо «ставь виртуалку».
 

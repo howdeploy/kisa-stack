@@ -1,0 +1,5711 @@
+import {
+  createWindowStack,
+  createWindowState,
+  dropWindowState,
+  cubicBezier,
+  createManagedPoll,
+  markManagedWindowDirty,
+  markWindowDirty,
+  read,
+  seconds,
+  COMPOSITOR,
+  type EasingFunction,
+  type GestureSwipeEvent,
+  type OutputChangeEvent,
+  type PointerMoveEvent,
+  type PollHandle,
+  type ReadonlySignal,
+  type WaylandWindow,
+  type WindowActivateRequestEvent,
+  type WindowFullscreenRequestEvent,
+  type WindowMaximizeRequestEvent,
+  type WindowMinimizeRequestEvent,
+  type WindowMoveEvent,
+  type WindowResizeEvent,
+  type WindowResizeRect,
+} from "shoji_wm";
+import type { ManagedWindowRect, WindowSizeConstraints } from "shoji_wm/types";
+import { playRectAnimation, stopRectAnimation, LAYOUT_TRANSITION_EASING, LAYOUT_TRANSITION_DURATION } from "./window-animation";
+import { startLayoutMelt } from "./effect/layout-melt";
+import { beginWorkspaceWave, finishWorkspaceWave, setWorkspaceWaveProgress, stopWorkspaceWave, WORKSPACE_WAVE_DURATION, WORKSPACE_WAVE_EASING } from "./effect/workspace-wave";
+import { playWindowWave, windowWaveClosedProgress, WINDOW_DISSOLVE_DURATION } from "./effect/window-wave";
+import { updateDragJelly, stopDragJelly } from "./effect/window-drag-jelly";
+import { updateMonitorPortal } from "./effect/monitor-portal";
+
+export type SnapZone =
+  | "maximize"
+  | "left"
+  | "right"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
+export const WINDOW_STATE_RECT = createWindowState<ManagedWindowRect>("rect", {
+  default: (window) => window.rect,
+});
+export const WINDOW_STATE_RESTORE_RECT =
+  createWindowState<ManagedWindowRect | null>("restoreRect", {
+    default: null,
+  });
+export const WINDOW_STATE_MINIMIZED = createWindowState<boolean>("minimized", {
+  default: false,
+});
+export const WINDOW_STATE_MINIMIZE_VISUAL_IDLE = createWindowState<boolean>(
+  "minimizeVisualIdle",
+  {
+    default: false,
+  },
+);
+export const WINDOW_STATE_MAXIMIZED = createWindowState<boolean>("maximized", {
+  default: false,
+});
+export const WINDOW_STATE_FULLSCREEN = createWindowState<boolean>(
+  "fullscreen",
+  {
+    default: false,
+  },
+);
+export const WINDOW_STATE_FULLSCREEN_WITH_CHROME = createWindowState<boolean>(
+  "fullscreenWithChrome", { default: false },
+);
+// Pre-fullscreen rect, kept separate from WINDOW_STATE_RESTORE_RECT so a
+// window that was maximized before going fullscreen restores back to its
+// maximized rect (and the maximize restore rect underneath stays intact).
+export const WINDOW_STATE_FULLSCREEN_RESTORE_RECT =
+  createWindowState<ManagedWindowRect | null>("fullscreenRestoreRect", {
+    default: null,
+  });
+export const WINDOW_STATE_WORKSPACE_VISIBLE = createWindowState<boolean>(
+  "workspaceVisible",
+  {
+    default: true,
+  },
+);
+export const WINDOW_STATE_WORKSPACE_OFFSET_Y = createWindowState<number>(
+  "workspaceOffsetY",
+  {
+    default: 0,
+  },
+);
+export const WINDOW_STATE_WORKSPACE_OPACITY = createWindowState<number>(
+  "workspaceOpacity",
+  {
+    default: 1,
+  },
+);
+export const WINDOW_STATE_TILE_DRAGGING = createWindowState<boolean>(
+  "tileDragging",
+  {
+    default: false,
+  },
+);
+export const WINDOW_STATE_TILE_REORDERING = createWindowState<boolean>(
+  "tileReordering",
+  {
+    default: false,
+  },
+);
+export const WINDOW_STATE_TILED = createWindowState<boolean>("tiled", {
+  default: false,
+});
+export const WINDOW_STATE_WORKSPACE_TILED = createWindowState<boolean>(
+  "workspaceTiled",
+  {
+    default: false,
+  },
+);
+export const WINDOW_STATE_VISIBLE_OUTPUTS = createWindowState<string[] | null>(
+  "visibleOutputs",
+  {
+    default: null,
+  },
+);
+export const WINDOW_STATE_FLOATING_RECT =
+  createWindowState<ManagedWindowRect | null>("floatingRect", {
+    default: null,
+  });
+const WINDOW_STATE_FLOATING_MAXIMIZED = createWindowState<boolean>(
+  "floatingMaximized", { default: false },
+);
+export const WINDOW_STATE_SNAP_ZONE = createWindowState<SnapZone | null>(
+  "snapZone",
+  {
+    default: null,
+  },
+);
+export const WINDOW_STATE_SNAP_MONITOR = createWindowState<string | null>(
+  "snapMonitor",
+  {
+    default: null,
+  },
+);
+
+const OPEN_CLOSE_ANIMATION_DURATION = WINDOW_DISSOLVE_DURATION + 34;
+const INITIAL_TILEABILITY_SETTLE_DURATION = seconds(1);
+const WINDOW_MANAGEMENT_ANIMATION_DURATION = seconds(0.3);
+const UNMAXIMIZE_GRAB_ANIMATION_DURATION = 90;
+// See `lastRestoreAtMs`: a restore and an activate closer together than this
+// are one taskbar click, so the minimize-raise toggle must not fire.
+const RESTORE_ACTIVATE_GRACE_MS = 100;
+const WINDOW_MANAGEMENT_EASING = cubicBezier(0.1, 0.9, 0.2, 1.0);
+export const TILE_ANIMATION_DURATION = seconds(0.5);
+// Gentle landing; the moving edge carries the visible material response.
+const TILE_SPRING_EASING = cubicBezier(0.32, 1.08, 0.5, 1.0);
+const TILE_SPRING_DURATION = 460;
+const WORKSPACE_SWITCH_ANIMATION_DURATION = WORKSPACE_WAVE_DURATION;
+const WORKSPACE_GESTURE_FINGERS = 3;
+const WORKSPACE_GESTURE_AXIS_LOCK_PX = 8;
+const WORKSPACE_GESTURE_THRESHOLD_RATIO = 0.22;
+const WORKSPACE_GESTURE_VELOCITY_THRESHOLD = 900;
+const WORKSPACE_KINETIC_SCROLL_MIN_VELOCITY = 120;
+const WORKSPACE_KINETIC_SCROLL_MAX_VELOCITY = 5000;
+const WORKSPACE_KINETIC_SCROLL_STOP_VELOCITY = 18;
+const WORKSPACE_KINETIC_SCROLL_TIME_CONSTANT_MS = 360;
+const WORKSPACE_KINETIC_SCROLL_FALLBACK_REFRESH_RATE = 120;
+const TILE_DRAG_WORKSPACE_EDGE_PX = 80;
+const TILE_DRAG_WORKSPACE_SWITCH_INTERVAL_MS = 420;
+const TILE_GAP = 12;
+const TILE_MARGIN = 12;
+const TILE_WIDTH_RATIO = 0.5;
+const TILE_MIN_WIDTH = 240;
+export const PERSISTENT_WORKSPACE_COUNT = 3;
+// Fractional-scale rounding can leave a tile a hair past the screen edge;
+// overflow at or below this is "fully visible" for the focus-key pan step.
+const MANAGED_WINDOW_ONLY_REBUILD_SUPPRESSION = {
+  allowManagedWindowOnly: true,
+  onViolation: "fallback-last",
+} as const;
+const STRICT_MANAGED_WINDOW_ONLY_REBUILD_SUPPRESSION = {
+  allowManagedWindowOnly: true,
+  onViolation: "fallback",
+} as const;
+const MANAGED_WINDOW_ONLY_ANIMATION = {
+  suppressSSDRebuild: true,
+} as const;
+
+// Windows-style edge snapping for floating drags. Distances are logical px.
+//   - within SNAP_EDGE_PX of an edge triggers that edge's zone
+//   - within SNAP_CORNER_PX of a corner (along both axes) triggers a quarter
+//   - SNAP_GAP_PX is the gap left between adjacent halves/quarters
+const SNAP_EDGE_PX = 16;
+const SNAP_CORNER_PX = 140;
+const SNAP_GAP_PX = 8;
+
+/** Monitor-local logical rect (relative to the monitor origin) for the bar. */
+export interface SnapPreviewRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SnapPreviewPayload {
+  monitor: string;
+  rect: SnapPreviewRect | null;
+  kind: "floating" | "tiling";
+}
+
+export type SnapPreviewBroadcaster = (preview: SnapPreviewPayload) => void;
+export type WorkspaceChangeBroadcaster = () => void;
+
+type LayoutSnapZone = Exclude<SnapZone, "maximize">;
+type SnapColumn = "left" | "right";
+
+interface FloatingSnapLayout {
+  splitX: number;
+  leftSplitY: number;
+  rightSplitY: number;
+}
+
+function markWindowCompositionDirty(window: WaylandWindow): void {
+  markWindowDirty(window.id);
+}
+
+interface LayoutOptions {
+  suppressSSDRebuild?: boolean;
+  animate?: boolean;
+  spring?: boolean;
+  modeTransition?: boolean;
+  initialWindowId?: string;
+  preserveMissingActive?: boolean;
+  cancelRectAnimations?: boolean;
+  immediateFloatingWindowIds?: ReadonlySet<string>;
+}
+
+interface AddWindowOptions {
+  restoreScrollIfInitiallyFloating?: boolean;
+}
+
+interface HybridWindowManagerSnapshot {
+  currentMonitor: string;
+  activeWorkspaceByMonitor: [string, number][];
+  workspaces: WorkspaceSnapshot[];
+}
+
+interface WorkspaceSnapshot {
+  monitor: string;
+  index: number;
+  isTiled: boolean;
+  layout?: "grid";
+  activeWindowId: string | null;
+  scrollOffset: number;
+  windows: WorkspaceWindowSnapshot[];
+}
+
+interface WorkspaceWindowSnapshot {
+  id: string;
+  tileWidth?: number;
+  floatingRect?: ManagedWindowRect | null;
+  floatingMaximized?: boolean;
+  restoreRect?: ManagedWindowRect | null;
+  fullscreenWithChrome?: boolean;
+  fullscreenRestoreRect?: ManagedWindowRect | null;
+  snapZone?: SnapZone | null;
+  snapMonitor?: string | null;
+  minimized: boolean;
+  maximized: boolean;
+}
+
+/**
+ * Compact, serializable view of the workspace layout for external clients
+ * (e.g. the bar) consumed over the IPC transport. Per-monitor so a per-output
+ * bar can render just its own workspaces.
+ */
+export interface WorkspacesViewWindow {
+  id: string;
+  appId?: string;
+  title: string;
+  focused: boolean;
+  /** epoch ms — most recent focus time for MRU ordering. 0 if never focused. */
+  lastFocusedAt: number;
+}
+
+export interface WorkspacesViewWorkspace {
+  index: number;
+  windowCount: number;
+  isTiled: boolean;
+  active: boolean;
+  windows: WorkspacesViewWindow[];
+}
+
+export interface WorkspacesViewMonitor {
+  name: string;
+  active: number;
+  workspaces: WorkspacesViewWorkspace[];
+}
+
+export interface WorkspacesView {
+  currentMonitor: string;
+  monitors: WorkspacesViewMonitor[];
+}
+
+interface WorkspaceGestureState {
+  monitor: string;
+  currentIndex: number;
+  direction: -1 | 1;
+  distance: number;
+  fromWorkspace: Workspace;
+  toWorkspace: Workspace | null;
+  fromOffsetY: number;
+  toOffsetY: number;
+  fromOpacity: number;
+  toOpacity: number;
+}
+
+type WorkspaceGestureMode = "workspace-switch" | "workspace-scroll";
+
+export interface WorkspaceGestureSpeedConfig {
+  /**
+   * Horizontal three-finger swipe movement multiplier for scrolling inside a
+   * tiled workspace.
+   */
+  workspaceScrollFactor?: number;
+  /**
+   * Horizontal release velocity multiplier for kinetic workspace scrolling.
+   * Defaults to workspaceScrollFactor when omitted.
+   */
+  workspaceScrollKineticFactor?: number;
+  /**
+   * Vertical three-finger swipe movement multiplier for workspace switching.
+   */
+  workspaceSwitchFactor?: number;
+  /**
+   * Vertical release velocity multiplier for deciding whether to commit a
+   * workspace switch. Defaults to workspaceSwitchFactor when omitted.
+   */
+  workspaceSwitchVelocityFactor?: number;
+  /**
+   * At or below this scroll speed (logical px/s of workspace movement) a
+   * three-finger workspace scroll catches on tile snap positions — the
+   * offsets where a tile sits fully on screen at the viewport edge
+   * (TILE_MARGIN gap), or centered for maximized tiles. Faster scrolling
+   * passes straight through. Applies to both the active gesture and the
+   * kinetic glide after release. 0 disables snapping.
+   */
+  workspaceScrollSnapMaxVelocity?: number;
+  /**
+   * Extra finger travel (logical px of workspace movement) needed to break
+   * out of a caught snap position while the fingers are still down.
+   */
+  workspaceScrollSnapBreakoutPx?: number;
+}
+
+interface ResolvedWorkspaceGestureSpeedConfig {
+  workspaceScrollFactor: number;
+  workspaceScrollKineticFactor: number;
+  workspaceSwitchFactor: number;
+  workspaceSwitchVelocityFactor: number;
+  workspaceScrollSnapMaxVelocity: number;
+  workspaceScrollSnapBreakoutPx: number;
+}
+
+const DEFAULT_WORKSPACE_GESTURE_SPEED: ResolvedWorkspaceGestureSpeedConfig = {
+  workspaceScrollFactor: 1,
+  workspaceScrollKineticFactor: 1,
+  workspaceSwitchFactor: 1,
+  workspaceSwitchVelocityFactor: 1,
+  workspaceScrollSnapMaxVelocity: 300,
+  workspaceScrollSnapBreakoutPx: 48,
+};
+
+function hotReloadDebugEnabled(): boolean {
+  const env = (globalThis as { process?: { env?: Record<string, string> } })
+    .process?.env;
+  const value = env?.SHOJI_HOT_RELOAD_DEBUG;
+  return value !== undefined && value !== "" && value !== "0";
+}
+
+function hotReloadDebug(
+  message: string,
+  details: Record<string, unknown> = {},
+): void {
+  if (!hotReloadDebugEnabled()) {
+    return;
+  }
+  console.info(`hot-reload ${message}`, JSON.stringify(details));
+}
+
+function sanitizeGestureSpeedFactor(
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return value;
+}
+
+/** Like sanitizeGestureSpeedFactor, but 0 is a valid value ("disabled"). */
+function sanitizeGestureThreshold(
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return value;
+}
+
+const WORKSPACE_VISUAL_ANIMATION_CHANNEL = "workspace.visual";
+const WORKSPACE_VISUAL_RECT_ANIMATION_CHANNEL = `${WORKSPACE_VISUAL_ANIMATION_CHANNEL}.rect`;
+const WORKSPACE_VISUAL_OPACITY_ANIMATION_CHANNEL = `${WORKSPACE_VISUAL_ANIMATION_CHANNEL}.opacity`;
+export const WINDOW_BORDER_PX = 2;
+export const TITLEBAR_HEIGHT = 30;
+export const MAXIMIZED_WINDOW_PADDING = {
+  top: 8,
+  right: 8,
+  bottom: 8,
+  left: 8,
+};
+
+function isTelegramMediaViewer(window: WaylandWindow): boolean {
+  // Telegram's viewer is a resizable fullscreen toplevel, not always transient.
+  const appId = window.appId() ?? "";
+  const title = window.title().trim().toLowerCase();
+  return /^org\.telegram\.desktop(?:[._]|$)/i.test(appId)
+    && (title === "просмотр медиа" || title === "media viewer");
+}
+
+export function isFloatingUtilityWindow(window: WaylandWindow): boolean {
+  const appId = (window.appId() ?? "").toLowerCase();
+  return appId === "flameshot" || appId === "org.flameshot.flameshot"
+    || appId === "pavucontrol" || appId === "org.pulseaudio.pavucontrol";
+}
+
+function canTileWindow(window: WaylandWindow): boolean {
+  return window.isResizable() && !window.isTransient()
+    && !isFloatingUtilityWindow(window) && !isTelegramMediaViewer(window);
+}
+
+export class HybridWindowManager {
+  private readonly workspaces = new Map<string, Workspace>();
+  private readonly activeWorkspaceByMonitor = new Map<string, number>();
+  private readonly windowStack = createWindowStack();
+  private readonly naturalRootRect: (rect: WaylandWindow) => ManagedWindowRect;
+  // Tracks MRU focus time per window id so the dock can pick "the most recent
+  // window of an app" deterministically. Updated by recordFocus().
+  private readonly lastFocusedAt = new Map<string, number>();
+  private readonly pendingInitialFocusByWindowId = new Map<string, number>();
+  private readonly tileabilityByWindowId = new Map<string, boolean>();
+  private readonly tileabilitySubscriptionsByWindowId = new Map<
+    string,
+    () => void
+  >();
+  private currentMonitor: string;
+  private isGrabbing = false;
+  private tileDrag: {
+    window: WaylandWindow;
+    workspace: Workspace;
+    lastWorkspaceSwitchAt: number;
+  } | null = null;
+  private floatingDrag: {
+    window: WaylandWindow;
+    workspace: Workspace;
+    lastWorkspaceSwitchAt: number;
+  } | null = null;
+  private maximizedMoveDrag: {
+    windowId: string;
+    width: number;
+    height: number;
+  } | null = null;
+  private workspaceGesture: WorkspaceGestureState | null = null;
+  private workspaceGestureMode: WorkspaceGestureMode | null = null;
+  private workspaceScrollGestureRectAnimationsCancelled = false;
+  /**
+   * Snap position the active scroll gesture is currently caught on, with the
+   * finger travel accumulated since catching. Movement is swallowed until it
+   * exceeds workspaceScrollSnapBreakoutPx, which releases the catch.
+   */
+  private workspaceScrollSnapLatch: {
+    offset: number;
+    overshoot: number;
+  } | null = null;
+  /** EMA of the active gesture's scroll speed (logical px/s, unsigned). */
+  private workspaceScrollGestureSpeed: number | null = null;
+  private workspaceGestureSpeed = { ...DEFAULT_WORKSPACE_GESTURE_SPEED };
+  private lastPointerPosition: PointerMoveEvent["position"] | null = null;
+  private lastPointerTarget: PointerMoveEvent["target"] = { kind: "none" };
+  // Broadcasts the active snap-zone preview rect to external clients (the bar).
+  private snapPreviewBroadcaster: SnapPreviewBroadcaster | null = null;
+  private workspaceChangeBroadcaster: WorkspaceChangeBroadcaster | null = null;
+  // Pending Windows-style snap decision for the in-flight floating drag.
+  private floatingSnap: {
+    windowId: string;
+    monitor: string;
+    zone: SnapZone;
+    rect: ManagedWindowRect;
+  } | null = null;
+
+  public constructor(
+    naturalRootRect: (rect: WaylandWindow) => ManagedWindowRect,
+  ) {
+    this.currentMonitor = "";
+    this.naturalRootRect = naturalRootRect;
+    this.syncWorkspaces();
+  }
+
+  public configureWorkspaceGestureSpeed(
+    config: WorkspaceGestureSpeedConfig,
+  ): void {
+    const workspaceScrollFactor = sanitizeGestureSpeedFactor(
+      config.workspaceScrollFactor,
+      DEFAULT_WORKSPACE_GESTURE_SPEED.workspaceScrollFactor,
+    );
+    const workspaceSwitchFactor = sanitizeGestureSpeedFactor(
+      config.workspaceSwitchFactor,
+      DEFAULT_WORKSPACE_GESTURE_SPEED.workspaceSwitchFactor,
+    );
+    this.workspaceGestureSpeed = {
+      workspaceScrollFactor,
+      workspaceScrollKineticFactor: sanitizeGestureSpeedFactor(
+        config.workspaceScrollKineticFactor,
+        workspaceScrollFactor,
+      ),
+      workspaceSwitchFactor,
+      workspaceSwitchVelocityFactor: sanitizeGestureSpeedFactor(
+        config.workspaceSwitchVelocityFactor,
+        workspaceSwitchFactor,
+      ),
+      workspaceScrollSnapMaxVelocity: sanitizeGestureThreshold(
+        config.workspaceScrollSnapMaxVelocity,
+        DEFAULT_WORKSPACE_GESTURE_SPEED.workspaceScrollSnapMaxVelocity,
+      ),
+      workspaceScrollSnapBreakoutPx: sanitizeGestureSpeedFactor(
+        config.workspaceScrollSnapBreakoutPx,
+        DEFAULT_WORKSPACE_GESTURE_SPEED.workspaceScrollSnapBreakoutPx,
+      ),
+    };
+  }
+
+  public onPointerMove(event: PointerMoveEvent) {
+    this.syncWorkspaces();
+    this.currentMonitor = event.outputName ?? this.currentMonitor;
+    this.lastPointerPosition = event.position;
+    this.lastPointerTarget = event.target;
+    this.focusWindowAtPointerTarget(event.target, event.outputName);
+  }
+
+  public onGestureSwipe(event: GestureSwipeEvent) {
+    if (event.fingers !== WORKSPACE_GESTURE_FINGERS) {
+      return;
+    }
+
+    this.syncWorkspaces();
+    if (event.position) {
+      this.lastPointerPosition = event.position;
+    }
+
+    if (event.phase === "begin") {
+      this.workspaceGesture = null;
+      this.workspaceGestureMode = null;
+      this.workspaceScrollGestureRectAnimationsCancelled = false;
+      this.workspaceScrollSnapLatch = null;
+      this.workspaceScrollGestureSpeed = null;
+      this.currentMonitor = this.gestureMonitor(event);
+      return;
+    }
+
+    if (event.phase === "update") {
+      const mode = this.resolveWorkspaceGestureMode(event);
+      if (mode === "workspace-scroll") {
+        this.workspaceGesture = null;
+        this.updateWorkspaceScrollGesture(event);
+        return;
+      }
+      if (mode === "workspace-switch") {
+        this.updateWorkspaceGesture(event);
+      }
+      return;
+    }
+
+    if (this.workspaceGestureMode === "workspace-scroll") {
+      this.workspaceGestureMode = null;
+      this.workspaceGesture = null;
+      this.finishWorkspaceScrollGesture(event);
+      this.workspaceScrollGestureRectAnimationsCancelled = false;
+      this.focusWindowAtPointerPosition(
+        event.position ?? this.lastPointerPosition,
+        event.outputName,
+      );
+      return;
+    }
+
+    this.workspaceGestureMode = null;
+    this.workspaceScrollGestureRectAnimationsCancelled = false;
+    this.finishWorkspaceGesture(event);
+  }
+
+  public onOutputChange(event: OutputChangeEvent) {
+    const liveMonitors = new Set(
+      event.outputs
+        .filter((output) => output.enabled)
+        .map((output) => output.name),
+    );
+    if (liveMonitors.size === 0) {
+      return;
+    }
+
+    const fallbackMonitor =
+      (this.currentMonitor && liveMonitors.has(this.currentMonitor)
+        ? this.currentMonitor
+        : undefined) ?? Array.from(liveMonitors)[0];
+    if (!fallbackMonitor) {
+      return;
+    }
+
+    const orphanedWorkspaces = Array.from(this.workspaces.values()).filter(
+      (workspace) => !liveMonitors.has(workspace.monitor),
+    );
+    if (orphanedWorkspaces.length === 0) {
+      this.syncWorkspaces();
+      this.refreshUsableAreaLayouts();
+      return;
+    }
+
+    const orphanedActiveWorkspaceByMonitor = new Map(
+      Array.from(this.activeWorkspaceByMonitor.entries()).filter(
+        ([monitor]) => !liveMonitors.has(monitor),
+      ),
+    );
+
+    for (const monitor of Array.from(this.activeWorkspaceByMonitor.keys())) {
+      if (!liveMonitors.has(monitor)) {
+        this.activeWorkspaceByMonitor.delete(monitor);
+      }
+    }
+
+    for (const workspace of orphanedWorkspaces) {
+      const oldKey = workspaceKey(workspace.monitor, workspace.index);
+      this.workspaces.delete(oldKey);
+
+      if (workspace.windowCount() === 0) {
+        workspace.clearExitLayoutHolds();
+        continue;
+      }
+
+      const targetMonitor = fallbackMonitor;
+      const targetIndex = this.availableWorkspaceIndex(
+        targetMonitor,
+        workspace.index,
+      );
+      const wasActiveOnRemovedMonitor =
+        orphanedActiveWorkspaceByMonitor.get(workspace.monitor) ===
+        workspace.index;
+      workspace.moveToMonitor(targetMonitor, targetIndex);
+      this.workspaces.set(workspaceKey(targetMonitor, targetIndex), workspace);
+      if (
+        wasActiveOnRemovedMonitor ||
+        !this.activeWorkspaceByMonitor.has(targetMonitor)
+      ) {
+        this.activeWorkspaceByMonitor.set(targetMonitor, targetIndex);
+      }
+      workspace.setVisible(workspace.isActive());
+      workspace.applyLayout({
+        suppressSSDRebuild: false,
+        animate: false,
+        preserveMissingActive: true,
+      });
+    }
+
+    if (!liveMonitors.has(this.currentMonitor)) {
+      this.currentMonitor = fallbackMonitor;
+    }
+    this.syncWorkspaces();
+    this.switchWorkspaceTo(
+      this.currentMonitor, this.activeWorkspaceByMonitor.get(this.currentMonitor) ?? 1,
+    );
+    this.refreshUsableAreaLayouts();
+    this.syncWorkspaceVisibility();
+  }
+
+  public onOpen(window: WaylandWindow) {
+    this.trackWindowTileability(window);
+    window.focus();
+    this.windowStack.add(window);
+
+    window.setCloseAnimationDuration(OPEN_CLOSE_ANIMATION_DURATION);
+  }
+
+  private trackWindowTileability(window: WaylandWindow) {
+    this.untrackWindowTileability(window.id);
+    this.tileabilityByWindowId.set(
+      window.id,
+      canTileWindow(window),
+    );
+
+    const onChange = () => {
+      const wasTileable = this.tileabilityByWindowId.get(window.id);
+      const isTileable = canTileWindow(window);
+      if (wasTileable === undefined || wasTileable === isTileable) {
+        return;
+      }
+
+      this.tileabilityByWindowId.set(window.id, isTileable);
+      if (!isTileable) {
+        this.pendingInitialFocusByWindowId.delete(window.id);
+      }
+      const workspace = this.findWorkspaceForWindow(window);
+      if (!workspace) {
+        return;
+      }
+
+      workspace.reclassifyWindow(window, wasTileable);
+      this.applyWorkspaceStackPolicy(workspace);
+    };
+
+    const unsubscribeResizable = window.isResizable.subscribe(onChange);
+    const unsubscribeTransient = window.isTransient.subscribe(onChange);
+    const unsubscribeAppId = window.appId.subscribe(onChange);
+    const unsubscribeTitle = window.title.subscribe(onChange);
+    this.tileabilitySubscriptionsByWindowId.set(window.id, () => {
+      unsubscribeResizable();
+      unsubscribeTransient();
+      unsubscribeAppId();
+      unsubscribeTitle();
+    });
+  }
+
+  private untrackWindowTileability(windowId: string) {
+    this.tileabilitySubscriptionsByWindowId.get(windowId)?.();
+    this.tileabilitySubscriptionsByWindowId.delete(windowId);
+    this.tileabilityByWindowId.delete(windowId);
+  }
+
+  public dispose() {
+    for (const workspace of this.workspaces.values()) {
+      workspace.clearExitLayoutHolds();
+      workspace.setVisible(workspace.isActive());
+    }
+    for (const unsubscribe of this.tileabilitySubscriptionsByWindowId.values()) {
+      unsubscribe();
+    }
+    this.tileabilitySubscriptionsByWindowId.clear();
+    this.tileabilityByWindowId.clear();
+    this.deferredInitialLayoutWindowIds.clear();
+  }
+
+  private readonly restoredDuringInitialConfigure = new Set<string>();
+  private readonly deferredInitialLayoutWindowIds = new Set<string>();
+
+  /**
+   * Windows that have presented at least one frame (`onFirstCommit`).
+   *
+   * A window's foreign-toplevel handle is created the moment the client makes
+   * its `xdg_toplevel` — before it has committed a single buffer — so a dock
+   * that focuses the window it just launched sends its `activate` while the
+   * window is still invisible. Noctalia's dock does exactly this (it arms a
+   * pending-launch-focus and activates as soon as a matching toplevel shows
+   * up), and "launch or focus" docks generally behave the same way.
+   *
+   * Without this set the minimize-raise toggle read that launch hand-off as
+   * "the user re-clicked the focused window's taskbar entry" and minimized a
+   * window that had never been shown — apps appeared to launch straight into
+   * the taskbar (issue #68). A taskbar entry the user can actually click
+   * belongs, by definition, to a window that has already presented.
+   */
+  private readonly presentedWindowIds = new Set<string>();
+
+  /**
+   * When each window was last restored from minimized, by wall clock.
+   *
+   * sfwbar's taskbar click sends `unset_minimized` and `activate` as separate
+   * requests in one flush (`foreign_toplevel_focus` → unset_minimized +
+   * `foreign_toplevel_activate`, which sends unset_minimized + activate
+   * again). By the time the activate handler runs, the unset_minimized has
+   * already restored the window, so the `wasMinimized` guard in
+   * `onWindowActivateRequest` sees an unminimized window — and since focus
+   * never leaves a minimized window, the minimize-raise toggle read the
+   * activate as "the user re-clicked the focused window's taskbar entry" and
+   * re-minimized it (visible as a one-frame flash of the window).
+   *
+   * A restore and an activate that arrive within this grace period are one
+   * gesture, never a toggle. Same-flush requests run back-to-back (< a few
+   * ms); two intentional clicks are always further apart than this.
+   */
+  private readonly lastRestoreAtMs = new Map<string, number>();
+
+  private initializeWindowLayout(
+    window: WaylandWindow,
+    options: AddWindowOptions = {},
+  ): {
+    workspace: Workspace | undefined;
+    restoredExistingWindow: boolean;
+  } {
+    const existingWorkspace = this.findWorkspaceForWindow(window);
+    if (existingWorkspace) {
+      return {
+        workspace: existingWorkspace,
+        restoredExistingWindow: this.restoredDuringInitialConfigure.has(
+          window.id,
+        ),
+      };
+    }
+
+    let restoredExistingWindow = false;
+    const workspace =
+      this.findWorkspaceRestoringWindow(window) ?? this.getCurrentWorkspace();
+    if (workspace) {
+      restoredExistingWindow = workspace.addWindow(window, options);
+      if (
+        !restoredExistingWindow &&
+        workspace.isTiled &&
+        workspace.shouldTile(window)
+      ) {
+        this.trackPendingInitialFocus(window);
+      }
+      this.applyWorkspaceStackPolicy(workspace);
+      this.syncWorkspaceVisibility();
+    } else {
+      window.state[WINDOW_STATE_RECT].set(this.naturalRootRect(window));
+    }
+
+    if (window.isMaximized() && !window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
+      window.state[WINDOW_STATE_RESTORE_RECT].set(
+        this.initialRestoreRectForMaximizedWindow(window),
+      );
+      window.state[WINDOW_STATE_RECT].set(this.maximizedRectForWindow(window));
+      window.state[WINDOW_STATE_MAXIMIZED].set(true);
+    }
+
+    // A window that is already fullscreen when it joins keeps the fullscreen
+    // rect. xwayland-satellite requests fullscreen at creation for an X window
+    // sized like the output, and that request lands before the first commit,
+    // so `onWindowFullscreenRequest` has already run — but `addWindow` above
+    // just placed the window at its centered/floating rect, and that went out
+    // as a Fullscreen configure carrying a windowed size (960x676 for a
+    // 1600x1000 output). SDL2 treats a fullscreen configure at the wrong size
+    // as a failed switch and leaves fullscreen ~1s later, which is why the
+    // first entry into fullscreen only sometimes took.
+    if (window.state[WINDOW_STATE_FULLSCREEN]() || window.isFullscreen()) {
+      const fullscreenRect = this.fullscreenRectForWindow(window);
+      window.state[WINDOW_STATE_FULLSCREEN].set(true);
+      stopRectAnimation(window, WINDOW_STATE_RECT);
+      window.state[WINDOW_STATE_RECT].set(fullscreenRect);
+      workspace?.syncFloatingWindowRect(window, fullscreenRect);
+    }
+
+    if (restoredExistingWindow) {
+      this.restoredDuringInitialConfigure.add(window.id);
+    }
+    return { workspace, restoredExistingWindow };
+  }
+
+  public onInitialConfigure(window: WaylandWindow) {
+    if (this.shouldDeferInitialWindowLayout(window)) {
+      this.deferredInitialLayoutWindowIds.add(window.id);
+      return;
+    }
+
+    this.deferredInitialLayoutWindowIds.delete(window.id);
+    const { workspace, restoredExistingWindow } =
+      this.initializeWindowLayout(window);
+    hotReloadDebug("hybrid-initial-configure", {
+      windowId: window.id,
+      title: window.title.peek(),
+      workspace: workspace
+        ? { monitor: workspace.monitor, index: workspace.index }
+        : null,
+      restoredExistingWindow,
+      rect: window.state[WINDOW_STATE_RECT](),
+    });
+  }
+
+  private shouldDeferInitialWindowLayout(window: WaylandWindow): boolean {
+    if (this.findWorkspaceRestoringWindow(window)) {
+      return false;
+    }
+
+    // Maximized/fullscreen windows need an output-sized initial configure.
+    if (window.isMaximized.peek() || window.isFullscreen.peek()) {
+      return false;
+    }
+
+    // In floating mode, the client must choose its remembered or natural size
+    // before the window can be centered. Applying the fallback rect to the
+    // initial configure would overwrite that size and can make fixed-size
+    // dialogs temporarily huge.
+    if (this.getCurrentWorkspace()?.isTiled !== true) {
+      return true;
+    }
+
+    // A floating window must commit its natural client size before it can be
+    // centered. Using the pre-commit geometry here feeds the degenerate-size
+    // fallback into the initial configure and makes fixed-size dialogs huge.
+    if (!canTileWindow(window)) {
+      return true;
+    }
+
+    // With no min/max constraints, Wayland cannot yet distinguish an
+    // unconstrained tiled window from a client that will declare a fixed size
+    // on its first frame.
+    return !this.hasInitialTileabilityDecision(window);
+  }
+
+  private hasInitialTileabilityDecision(window: WaylandWindow): boolean {
+    const constraints = window.sizeConstraints.peek();
+    return constraints.min != null || constraints.max != null;
+  }
+
+  public snapshot(): HybridWindowManagerSnapshot {
+    const snapshot = {
+      currentMonitor: this.currentMonitor,
+      activeWorkspaceByMonitor: Array.from(
+        this.activeWorkspaceByMonitor.entries(),
+      ),
+      workspaces: Array.from(this.workspaces.values()).map((workspace) =>
+        workspace.snapshot(),
+      ),
+    };
+    hotReloadDebug("hybrid-snapshot", {
+      currentMonitor: snapshot.currentMonitor,
+      workspaceCount: snapshot.workspaces.length,
+      workspaces: snapshot.workspaces.map((workspace) => ({
+        monitor: workspace.monitor,
+        index: workspace.index,
+        isTiled: workspace.isTiled,
+        activeWindowId: workspace.activeWindowId,
+        windowIds: workspace.windows.map((window) => window.id),
+      })),
+    });
+    return snapshot;
+  }
+
+  public restore(snapshot: HybridWindowManagerSnapshot) {
+    hotReloadDebug("hybrid-restore", {
+      currentMonitor: snapshot.currentMonitor,
+      workspaceCount: snapshot.workspaces.length,
+      workspaces: snapshot.workspaces.map((workspace) => ({
+        monitor: workspace.monitor,
+        index: workspace.index,
+        isTiled: workspace.isTiled,
+        activeWindowId: workspace.activeWindowId,
+        windowIds: workspace.windows.map((window) => window.id),
+      })),
+    });
+    this.currentMonitor = snapshot.currentMonitor;
+    this.activeWorkspaceByMonitor.clear();
+    for (const [monitor, index] of snapshot.activeWorkspaceByMonitor) {
+      this.activeWorkspaceByMonitor.set(monitor, index);
+    }
+    for (const workspace of this.workspaces.values()) {
+      workspace.clearExitLayoutHolds();
+    }
+    this.workspaces.clear();
+    for (const workspaceSnapshot of snapshot.workspaces) {
+      const workspace = this.ensureWorkspace(
+        workspaceSnapshot.monitor,
+        workspaceSnapshot.index,
+      );
+      workspace.restore(workspaceSnapshot);
+    }
+    const monitor = this.getCurrentMonitorName();
+    this.switchWorkspaceTo(monitor, this.activeWorkspaceByMonitor.get(monitor) ?? 1);
+  }
+
+  public onFirstCommit(window: WaylandWindow) {
+    this.presentedWindowIds.add(window.id);
+    if (!this.tileabilityByWindowId.has(window.id)) {
+      this.trackWindowTileability(window);
+    }
+    if (!this.windowStack.has(window)) {
+      this.windowStack.add(window, { at: "back" });
+    }
+    window.setCloseAnimationDuration(OPEN_CLOSE_ANIMATION_DURATION);
+
+    const layoutWasDeferred = this.deferredInitialLayoutWindowIds.delete(
+      window.id,
+    );
+    const initialized = this.initializeWindowLayout(window, {
+      restoreScrollIfInitiallyFloating: layoutWasDeferred,
+    });
+    const restoredDuringInitialConfigure =
+      this.restoredDuringInitialConfigure.delete(window.id);
+    const restoredExistingWindow =
+      initialized.restoredExistingWindow || restoredDuringInitialConfigure;
+    const workspace = initialized.workspace;
+    if (window.appId() === "swappy") {
+      console.info("swappy-placement", JSON.stringify({
+        windowId: window.id,
+        monitor: workspace?.monitor,
+        tiled: workspace?.isTiled,
+        resizable: window.isResizable(),
+        position: window.position,
+        rect: window.rect,
+        managedRect: snapshotManagedRect(window.state[WINDOW_STATE_RECT]()),
+        usableArea: workspace ? COMPOSITOR.layer.usableArea(workspace.monitor) : null,
+        restoredExistingWindow,
+      }));
+    }
+    if (!restoredExistingWindow) {
+      if (workspace?.isTiled && workspace.shouldTile(window)) {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+      }
+      scheduleOpenAnimation(window);
+    }
+    hotReloadDebug("hybrid-first-commit", {
+      windowId: window.id,
+      title: window.title.peek(),
+      workspace: workspace
+        ? { monitor: workspace.monitor, index: workspace.index }
+        : null,
+      restoredExistingWindow,
+      scheduledOpenAnimation: !restoredExistingWindow,
+    });
+  }
+
+  public onStartClose(window: WaylandWindow) {
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    scheduleCloseAnimation(window);
+
+    for (const workspace of this.workspaces.values()) {
+      workspace.holdTileLayoutForExit(window);
+      const nextFocus = workspace.removeWindow(window);
+      if (nextFocus !== undefined) {
+        if (!isTelegramMediaViewer(window) && !isFloatingUtilityWindow(window)) workspace.applyLayout();
+        nextFocus?.focus();
+        break;
+      }
+    }
+    this.syncWorkspaceVisibility();
+  }
+
+  public onClose(window: WaylandWindow) {
+    this.presentedWindowIds.delete(window.id);
+    this.lastRestoreAtMs.delete(window.id);
+    this.restoredDuringInitialConfigure.delete(window.id);
+    this.deferredInitialLayoutWindowIds.delete(window.id);
+    this.pendingInitialFocusByWindowId.delete(window.id);
+    this.untrackWindowTileability(window.id);
+    this.windowStack.remove(window);
+    for (const workspace of this.workspaces.values()) {
+      const released = workspace.releaseExitLayoutHold(window.id);
+      const removed = workspace.removeWindow(window) !== undefined;
+      if ((removed && !isTelegramMediaViewer(window) && !isFloatingUtilityWindow(window)) || released) {
+        workspace.applyLayout({ spring: released });
+      }
+    }
+    this.syncWorkspaceVisibility();
+    // `window.state[...]` (used for e.g. WINDOW_STATE_RECT, minimized, etc.)
+    // is backed by a module-level `signalsByWindowId` map in window-state.ts
+    // keyed by window id. Nothing else clears that entry when a window
+    // closes, so every window ever opened accumulates its own permanent
+    // entry there for the lifetime of the compositor process. This doesn't
+    // explain GPU/VRAM growth (that's the native closing-snapshot leak,
+    // fixed on the Rust side), but it's the same class of bug on the JS
+    // heap and should be cleaned up alongside it.
+    dropWindowState(window.id);
+  }
+
+  public onFocus(window: WaylandWindow, focused: boolean) {
+    const workspace = this.findWorkspaceForWindow(window);
+    if (focused) {
+      this.windowStack.raise(window);
+      if (this.shouldDeferFocusLayoutForInitialOpen(window, workspace)) {
+        this.applyWorkspaceStackPolicy(workspace);
+        return;
+      }
+      if (workspace?.isTiled && workspace.isActive()) {
+        workspace.focusWindow(window);
+        this.applyWorkspaceStackPolicy(workspace);
+      }
+    }
+  }
+
+  public onWindowResize(event: WindowResizeEvent) {
+    if (event.window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) return;
+    if (!read(event.window.isResizable)) {
+      return;
+    }
+
+    const workspace = this.findWorkspaceForWindow(event.window);
+    if (event.phase === "start" || event.phase === "update") {
+      this.beginInteractiveUnmaximize(event.window);
+    }
+
+    if (workspace?.isTiled && workspace.shouldTile(event.window)) {
+      workspace.resizeTile(event);
+      this.applyWorkspaceStackPolicy(workspace);
+      return;
+    }
+
+    const nextRect = this.constrainResizeRect(event);
+    if (
+      workspace &&
+      this.resizeFloatingSnapLayout(event, workspace, nextRect)
+    ) {
+      this.applyWorkspaceStackPolicy(workspace);
+      return;
+    }
+
+    stopRectAnimation(event.window, WINDOW_STATE_RECT);
+    event.window.state[WINDOW_STATE_RECT].set(nextRect);
+    workspace?.syncFloatingWindowRect(event.window, nextRect);
+    this.applyWorkspaceStackPolicy(workspace);
+  }
+
+  public onWindowMove(event: WindowMoveEvent) {
+    if (event.window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) return;
+    const workspace = this.findWorkspaceForWindow(event.window);
+    if (workspace?.isTiled && workspace.shouldTile(event.window)) {
+      stopDragJelly(event.window);
+      updateMonitorPortal(event);
+      this.onTileWindowMove(event, workspace);
+      this.applyWorkspaceStackPolicy(workspace);
+      return;
+    }
+
+    if (workspace?.isTiled) stopDragJelly(event.window);
+    else updateDragJelly(event);
+    updateMonitorPortal(event);
+    if (workspace) {
+      this.onFloatingWindowMove(event, workspace);
+      return;
+    }
+
+    const window = event.window;
+    if (event.phase === "start" && window.state[WINDOW_STATE_MAXIMIZED]()) {
+      const restoreRect =
+        window.state[WINDOW_STATE_RESTORE_RECT]() ?? event.currentRect;
+      this.maximizedMoveDrag = {
+        windowId: window.id,
+        width: read(restoreRect.width),
+        height: read(restoreRect.height),
+      };
+      this.beginInteractiveUnmaximize(window);
+    }
+    if (event.phase === "start") {
+      this.isGrabbing = true;
+      this.clearWindowSnapState(window);
+    }
+
+    const maximizedMoveDrag =
+      this.maximizedMoveDrag?.windowId === window.id
+        ? this.maximizedMoveDrag
+        : null;
+    if (maximizedMoveDrag) {
+      const nextRect = this.restoreRectForMaximizedMove(
+        event,
+        maximizedMoveDrag.width,
+        maximizedMoveDrag.height,
+      );
+      if (event.phase === "start") {
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          nextRect,
+          WINDOW_MANAGEMENT_EASING,
+          UNMAXIMIZE_GRAB_ANIMATION_DURATION,
+        );
+      } else {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(nextRect);
+      }
+      if (event.phase === "end") {
+        this.isGrabbing = false;
+        this.maximizedMoveDrag = null;
+        this.finishFloatingDragSnap(event, workspace);
+      } else if (event.phase === "cancel") {
+        this.isGrabbing = false;
+        this.maximizedMoveDrag = null;
+        this.finishFloatingDragSnap(event, workspace);
+      } else {
+        this.updateFloatingDragSnap(event);
+      }
+      return;
+    }
+
+    if (event.phase === "end" || event.phase === "cancel") {
+      this.isGrabbing = false;
+      const snapped = this.finishFloatingDragSnap(event, workspace);
+      if (!snapped) {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(event.currentRect);
+      }
+      this.applyWorkspaceStackPolicy(workspace);
+      return;
+    }
+
+    this.updateFloatingDragSnap(event);
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(event.currentRect);
+    this.applyWorkspaceStackPolicy(workspace);
+  }
+
+  private onFloatingWindowMove(event: WindowMoveEvent, workspace: Workspace) {
+    const window = event.window;
+    if (
+      event.phase === "start" ||
+      !this.floatingDrag ||
+      this.floatingDrag.window.id !== window.id
+    ) {
+      this.isGrabbing = true;
+      this.floatingDrag = {
+        window,
+        workspace,
+        lastWorkspaceSwitchAt: event.timestamp,
+      };
+      if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+        const restoreRect =
+          window.state[WINDOW_STATE_RESTORE_RECT]() ?? event.currentRect;
+        this.maximizedMoveDrag = {
+          windowId: window.id,
+          width: read(restoreRect.width),
+          height: read(restoreRect.height),
+        };
+        this.beginInteractiveUnmaximize(window);
+      }
+      this.clearWindowSnapState(window);
+    }
+
+    const drag = this.floatingDrag;
+    if (!drag) {
+      return;
+    }
+
+    const maximizedMoveDrag =
+      this.maximizedMoveDrag?.windowId === window.id
+        ? this.maximizedMoveDrag
+        : null;
+    const nextRect: ManagedWindowRect = maximizedMoveDrag
+      ? this.restoreRectForMaximizedMove(
+          event,
+          maximizedMoveDrag.width,
+          maximizedMoveDrag.height,
+        )
+      : event.currentRect;
+
+    if (maximizedMoveDrag && event.phase === "start") {
+      playRectAnimation(
+        window,
+        WINDOW_STATE_RECT,
+        nextRect,
+        WINDOW_MANAGEMENT_EASING,
+        UNMAXIMIZE_GRAB_ANIMATION_DURATION,
+      );
+    } else {
+      stopRectAnimation(window, WINDOW_STATE_RECT);
+      window.state[WINDOW_STATE_RECT].set(nextRect);
+    }
+
+    if (event.phase !== "cancel") {
+      const targetWorkspace = this.workspaceForFloatingDrag(event, drag);
+      if (targetWorkspace !== drag.workspace) {
+        drag.workspace.removeFloatingWindow(window);
+        drag.workspace.applyLayout();
+        if (targetWorkspace.isTiled && targetWorkspace.shouldTile(window)) {
+          stopDragJelly(window);
+          this.clearFloatingSnapPreview();
+          targetWorkspace.adoptTileDragWindow(window, nextRect);
+          drag.workspace = targetWorkspace;
+          this.floatingDrag = null;
+          this.tileDrag = {
+            window,
+            workspace: targetWorkspace,
+            lastWorkspaceSwitchAt: event.timestamp,
+          };
+          this.syncWorkspaceVisibility();
+          targetWorkspace.updateTileDrag(
+            window,
+            nextRect,
+            event.currentPointer.x,
+            event.currentPointer.y,
+          );
+          this.emitSnapPreview(
+            targetWorkspace.monitor,
+            targetWorkspace.draggingSlotRect(),
+            "tiling",
+          );
+          this.applyWorkspaceStackPolicy(targetWorkspace);
+          if (event.phase === "end") {
+            targetWorkspace.endTileDrag(window, false);
+            this.tileDrag = null;
+            this.maximizedMoveDrag = null;
+            this.isGrabbing = false;
+          }
+          window.focus();
+          return;
+        }
+        targetWorkspace.adoptFloatingWindow(window, nextRect);
+        drag.workspace = targetWorkspace;
+        this.syncWorkspaceVisibility();
+        window.focus();
+      } else {
+        targetWorkspace.syncFloatingWindowRect(window, nextRect);
+      }
+
+      this.applyWorkspaceStackPolicy(targetWorkspace);
+      this.updateFloatingDragSnap(event);
+    }
+
+    if (event.phase === "end" || event.phase === "cancel") {
+      const snapped = this.finishFloatingDragSnap(event, drag.workspace);
+      if (!snapped) {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(nextRect);
+        drag.workspace.syncFloatingWindowRect(window, nextRect);
+      }
+      this.applyWorkspaceStackPolicy(drag.workspace);
+      this.floatingDrag = null;
+      if (maximizedMoveDrag) {
+        this.maximizedMoveDrag = null;
+      }
+      this.isGrabbing = false;
+    }
+  }
+
+  private onTileWindowMove(event: WindowMoveEvent, workspace: Workspace) {
+    const window = event.window;
+    if (
+      event.phase === "start" ||
+      !this.tileDrag ||
+      this.tileDrag.window.id !== window.id
+    ) {
+      this.isGrabbing = true;
+      workspace.beginTileDrag(window, event.currentRect);
+      this.tileDrag = {
+        window,
+        workspace,
+        lastWorkspaceSwitchAt: event.timestamp,
+      };
+    }
+
+    const drag = this.tileDrag;
+    if (!drag) {
+      return;
+    }
+
+    if (event.phase === "end" || event.phase === "cancel") {
+      this.emitSnapPreview(drag.workspace.monitor, null, "tiling");
+      drag.workspace.endTileDrag(window, event.phase === "cancel");
+      this.tileDrag = null;
+      this.isGrabbing = false;
+      return;
+    }
+
+    let targetWorkspace = this.workspaceForTileDrag(event, drag);
+    if (targetWorkspace !== drag.workspace) {
+      this.emitSnapPreview(drag.workspace.monitor, null, "tiling");
+      drag.workspace.removeTileDragWindow(window);
+      drag.workspace.applyLayout();
+      if (!targetWorkspace.isTiled || !targetWorkspace.shouldTile(window)) {
+        window.state[WINDOW_STATE_TILE_DRAGGING].set(false);
+        targetWorkspace.adoptFloatingWindow(window, event.currentRect);
+        this.tileDrag = null;
+        this.floatingDrag = {
+          window,
+          workspace: targetWorkspace,
+          lastWorkspaceSwitchAt: event.timestamp,
+        };
+        this.syncWorkspaceVisibility();
+        this.applyWorkspaceStackPolicy(targetWorkspace);
+        this.updateFloatingDragSnap(event);
+        return;
+      }
+      targetWorkspace.adoptTileDragWindow(window, event.currentRect);
+      drag.workspace = targetWorkspace;
+      this.syncWorkspaceVisibility();
+    }
+
+    targetWorkspace.updateTileDrag(
+      window,
+      event.currentRect,
+      event.currentPointer.x,
+      event.currentPointer.y,
+    );
+    this.emitSnapPreview(
+      targetWorkspace.monitor,
+      targetWorkspace.draggingSlotRect(),
+      "tiling",
+    );
+  }
+
+  public onWindowMaximizeRequest(event: WindowMaximizeRequestEvent) {
+    const workspace = this.findWorkspaceForWindow(event.window);
+    if (this.isGrabbing) {
+      return;
+    }
+
+    const window = event.window;
+    if (window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
+      const restoreRect = window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
+      window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(false);
+      window.state[WINDOW_STATE_FULLSCREEN].set(false);
+      window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(null);
+      if (restoreRect) {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(restoreRect);
+        workspace?.syncFloatingWindowRect(window, restoreRect);
+      }
+    }
+    window.state[WINDOW_STATE_MINIMIZED].set(false);
+    this.clearWindowSnapState(window);
+
+    if (workspace?.isTiled && workspace.shouldTile(window)) {
+      if (!event.maximized) {
+        window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+        window.state[WINDOW_STATE_MAXIMIZED].set(false);
+        workspace.applyLayout();
+        this.applyWorkspaceStackPolicy(workspace);
+        return;
+      }
+
+      window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+      window.state[WINDOW_STATE_MAXIMIZED].set(true);
+      // Explicit maximize temporarily covers the grid on this monitor.
+      workspace.panToWindow(window);
+      this.applyWorkspaceStackPolicy(workspace);
+      window.focus();
+      return;
+    }
+
+    // While fullscreen, the fullscreen rect owns the window: only track the
+    // maximized flag here and leave the geometry alone. SDL2 (Unity/Source
+    // games via xwayland-satellite) drops _NET_WM_STATE_MAXIMIZED the moment
+    // it enters fullscreen, which arrived here as an unmaximize a few ms after
+    // the fullscreen request and animated the fullscreen window back to its
+    // pre-maximize rect — fullscreen "on" with the shell showing through.
+    // `onWindowFullscreenRequest(false)` picks the maximized rect back up
+    // when the flag is still set on the way out.
+    if (window.state[WINDOW_STATE_FULLSCREEN]()) {
+      if (event.maximized && !window.state[WINDOW_STATE_MAXIMIZED]()) {
+        const fullscreenRestoreRect =
+          window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
+        if (fullscreenRestoreRect) {
+          window.state[WINDOW_STATE_RESTORE_RECT].set(fullscreenRestoreRect);
+        }
+      }
+      if (!event.maximized) {
+        window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+      }
+      window.state[WINDOW_STATE_MAXIMIZED].set(event.maximized);
+      return;
+    }
+
+    if (!event.maximized) {
+      const restoreRect = window.state[WINDOW_STATE_RESTORE_RECT]();
+      if (restoreRect) {
+        workspace?.syncFloatingWindowRect(window, restoreRect);
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          restoreRect,
+          WINDOW_MANAGEMENT_EASING,
+          WINDOW_MANAGEMENT_ANIMATION_DURATION,
+        );
+      }
+      window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+      window.state[WINDOW_STATE_MAXIMIZED].set(false);
+      return;
+    }
+
+    if (!window.state[WINDOW_STATE_MAXIMIZED]()) {
+      const currentRect = window.state[WINDOW_STATE_RECT]();
+      const currentWidth = read(currentRect.width);
+      const currentHeight = read(currentRect.height);
+      if (currentWidth > 1 && currentHeight > 1) {
+        window.state[WINDOW_STATE_RESTORE_RECT].set(currentRect);
+      }
+    }
+    const maximizedRect = this.maximizedRectForWindow(window);
+    workspace?.syncFloatingWindowRect(window, maximizedRect);
+    playRectAnimation(
+      window,
+      WINDOW_STATE_RECT,
+      maximizedRect,
+      WINDOW_MANAGEMENT_EASING,
+      WINDOW_MANAGEMENT_ANIMATION_DURATION,
+    );
+    window.state[WINDOW_STATE_MAXIMIZED].set(true);
+    this.applyWorkspaceStackPolicy(workspace);
+  }
+
+  public onWindowMinimizeRequest(event: WindowMinimizeRequestEvent) {
+    // A fullscreen window has no minimize button, so a client-originated
+    // minimize while fullscreen is never the user: it is the X11 focus-loss
+    // reflex of game toolkits (GLFW's GLFW_AUTO_ICONIFY, SDL2's
+    // SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS) arriving through
+    // xwayland-satellite as WM_CHANGE_STATE → set_minimized the instant the
+    // window loses X input focus — which under a workspace model happens on
+    // every workspace switch, on every X11 popup another app opens (Steam
+    // notifications) and on every satellite unfocus. Honoring it dropped the
+    // game out of its workspace: coming back showed nothing until a taskbar
+    // click, and the reflex also fired mid-toggle so fullscreen ended up
+    // "on" with the window minimized. Wayland-native games have no such
+    // reflex; give X11 games the same behaviour. Taskbar/keybind minimizes
+    // carry other sources and still work.
+    if (
+      event.minimized &&
+      event.source === "client-csd" &&
+      event.window.state[WINDOW_STATE_FULLSCREEN]() &&
+      !event.window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()
+    ) {
+      hotReloadDebug("minimize-request-ignored-fullscreen", {
+        windowId: event.window.id,
+        appId: event.window.appId(),
+        focused: event.window.isFocused(),
+      });
+      return;
+    }
+    const wasMinimized = event.window.state[WINDOW_STATE_MINIMIZED]();
+    const workspace = this.findWorkspaceForWindow(event.window);
+    if (wasMinimized !== event.minimized) {
+      stopRectAnimation(event.window, WINDOW_STATE_RECT);
+      if (event.minimized) {
+        workspace?.holdTileLayoutForExit(event.window);
+      } else {
+        workspace?.releaseExitLayoutHold(event.window.id);
+      }
+      if (!event.minimized) {
+        this.lastRestoreAtMs.set(event.window.id, Date.now());
+        event.window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE].set(false);
+      }
+      event.window.state[WINDOW_STATE_MINIMIZED].set(event.minimized);
+      if (event.minimized) {
+        event.window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE].set(true);
+      }
+      markWindowCompositionDirty(event.window);
+      scheduleMinimizeAnimation(event.window, event.minimized);
+    }
+    if (workspace?.isTiled) {
+      if (!event.minimized && workspace.shouldTile(event.window)) {
+        workspace.focusWindow(event.window);
+      } else {
+        workspace.applyLayout();
+      }
+      this.applyWorkspaceStackPolicy(workspace);
+    }
+  }
+
+  public onWindowActivateRequest(event: WindowActivateRequestEvent) {
+    const wasMinimized = event.window.state[WINDOW_STATE_MINIMIZED]();
+    if (wasMinimized) {
+      this.onWindowMinimizeRequest({
+        window: event.window,
+        minimized: false,
+        source:
+          event.source === "xdg-activation" ||
+          event.source === "xwayland" ||
+          event.source === "keybind"
+            ? event.source
+            : "api",
+        timestamp: event.timestamp,
+      });
+    }
+    const workspace = this.findWorkspaceForWindow(event.window);
+    // Minimize-raise toggle: dock/taskbar sources only. xdg-activation and
+    // xwayland activations come from applications raising themselves
+    // (notification clicks, "open link" handoffs) — minimizing there would
+    // hide the window the app is trying to show.
+    if (
+      !wasMinimized &&
+      event.source !== "xdg-activation" &&
+      event.source !== "xwayland" &&
+      event.source !== "keybind" &&
+      this.minimizeOnReactivate(event.window, workspace)
+    ) {
+      return;
+    }
+    if (workspace) {
+      // If the window is on another workspace, switch with the same
+      // slide/fade animation as keyboard/gesture switching (no-op if same).
+      this.switchWorkspaceTo(workspace.monitor, workspace.index, {
+        focusActiveAfter: false,
+      });
+    }
+    // This activation has consumed any preceding restore; the next dock click
+    // is a new gesture even if it arrives inside the paired-request grace time.
+    this.lastRestoreAtMs.delete(event.window.id);
+    // Focus the target window after switching (overrides switchWorkspaceTo's focusActiveWindow).
+    event.window.focus();
+  }
+
+  /**
+   * Minimize-raise toggle (issue #71): activating the already-focused window
+   * from a dock/taskbar minimizes it instead of re-focusing, only when the
+   * window is on the visible workspace —
+   * activating a window on another workspace keeps the usual switch+focus.
+   * Routed through `window.minimize()` so the request takes the same Rust
+   * round trip as CSD buttons and taskbar set_minimized, keeping every
+   * minimize side effect centralized in `onWindowMinimizeRequest`.
+   *
+   * Never fires before the window has presented a frame: that activation is a
+   * dock handing focus to the app it just launched, not the user toggling a
+   * visible window. See `presentedWindowIds`.
+   */
+  private minimizeOnReactivate(
+    window: WaylandWindow,
+    workspace: Workspace | undefined,
+  ): boolean {
+    if (!this.presentedWindowIds.has(window.id)) {
+      return false;
+    }
+    if (!workspace || !workspace.isActive()) {
+      return false;
+    }
+    if (window.state[WINDOW_STATE_MINIMIZED]() || !window.isFocused()) {
+      return false;
+    }
+    // A restore that just happened means this activate is the tail of the
+    // same taskbar click (sfwbar sends unset_minimized + activate as
+    // separate requests), not a re-click of a visible window.
+    const restoredAt = this.lastRestoreAtMs.get(window.id);
+    if (
+      restoredAt !== undefined &&
+      Date.now() - restoredAt <= RESTORE_ACTIVATE_GRACE_MS
+    ) {
+      return false;
+    }
+    window.minimize();
+    return true;
+  }
+
+  public toggleCurrentWorkspaceTiling() {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      const workspace = this.getCurrentWorkspace();
+      if (!workspace) {
+        return;
+      }
+      workspace.setTiled(!workspace.isTiled);
+      this.applyWorkspaceStackPolicy(workspace);
+      this.restoreFloatingFocusStacking(workspace);
+    });
+  }
+
+  public toggleWorkspaceTilingForMonitor(monitor: string) {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      this.syncWorkspaces();
+      const workspace = this.workspaceForMonitor(monitor);
+      if (!workspace) {
+        return;
+      }
+      workspace.setTiled(!workspace.isTiled);
+      this.applyWorkspaceStackPolicy(workspace);
+      this.restoreFloatingFocusStacking(workspace);
+    });
+  }
+
+  /**
+   * After leaving tiling mode the "floating windows stay above tiles" policy
+   * no longer applies; put the focused window back on top explicitly because
+   * focusing an already-focused window does not emit another focus event.
+   * Only called from the tiling toggles, where focus signals are settled —
+   * during window-open initialization they can be stale (two windows both
+   * reporting focused) and raising here would hoist the wrong window.
+   */
+  private restoreFloatingFocusStacking(workspace: Workspace) {
+    if (workspace.isTiled) {
+      return;
+    }
+    const focusedWindow = workspace.focusedWindow();
+    if (focusedWindow && this.windowStack.has(focusedWindow)) {
+      this.windowStack.raise(focusedWindow);
+    }
+  }
+
+  public focusTile(direction: -1 | 1) {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      const workspace = this.getCurrentWorkspace();
+      if (!workspace?.isTiled) {
+        return;
+      }
+      workspace.focusRelative(direction);
+      this.applyWorkspaceStackPolicy(workspace);
+    });
+  }
+
+  public moveFocusedTile(direction: -1 | 1) {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      const workspace = this.getCurrentWorkspace();
+      if (!workspace?.isTiled) {
+        return;
+      }
+      if (!workspace.moveFocusedTile(direction)) {
+        return;
+      }
+      this.applyWorkspaceStackPolicy(workspace);
+    });
+  }
+
+  public moveFocusedWindowToWorkspace(direction: -1 | 1) {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      this.syncWorkspaces();
+
+      const focused = Array.from(this.workspaces.values())
+        .map((workspace) => ({
+          workspace,
+          window: workspace.focusedWindow(),
+        }))
+        .find(({ window }) => window !== undefined);
+      const window = focused?.window;
+      if (!window) {
+        return;
+      }
+
+      const fromWorkspace = focused.workspace;
+      const targetIndex = Math.max(1, fromWorkspace.index + direction);
+      if (targetIndex === fromWorkspace.index) {
+        return;
+      }
+
+      const targetWorkspace = this.ensureWorkspace(
+        fromWorkspace.monitor,
+        targetIndex,
+      );
+      const moved = fromWorkspace.takeWindowForMove(window);
+      if (!moved) {
+        return;
+      }
+
+      targetWorkspace.addMovedWindow(window, moved.snapshot);
+      fromWorkspace.applyLayout();
+      targetWorkspace.applyLayout();
+      this.switchWorkspaceTo(fromWorkspace.monitor, targetIndex, {
+        focusActiveAfter: false,
+      });
+      if (targetWorkspace.isTiled) {
+        targetWorkspace.panToWindow(window);
+      }
+      window.focus();
+      this.applyWorkspaceStackPolicy(fromWorkspace);
+      this.applyWorkspaceStackPolicy(targetWorkspace);
+      this.syncWorkspaceVisibility();
+    });
+  }
+
+  public closeFocusedWindow() {
+    for (const workspace of this.workspaces.values()) {
+      const focused = workspace.focusedWindow();
+      if (focused) {
+        focused.close();
+        return;
+      }
+    }
+  }
+
+  public toggleFocusedWindowMaximize() {
+    for (const workspace of this.workspaces.values()) {
+      const focused = workspace.focusedWindow();
+      if (!focused || !read(focused.isResizable)) {
+        continue;
+      }
+
+      if (focused.state[WINDOW_STATE_MAXIMIZED]()) {
+        focused.unmaximize();
+      } else {
+        focused.maximize();
+      }
+      return;
+    }
+  }
+
+  // Super+F fills the output without asking the client to hide its UI.
+  // Native fullscreen requests (browser F11, games) retain their own path.
+  public toggleFocusedWindowFullscreen() {
+    if (this.isGrabbing) return;
+    for (const workspace of this.workspaces.values()) {
+      const focused = workspace.focusedWindow();
+      if (!focused) {
+        continue;
+      }
+      if (focused.state[WINDOW_STATE_FULLSCREEN]() &&
+          !focused.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
+        focused.unfullscreen();
+      } else {
+        this.onWindowFullscreenRequest({
+          window: focused,
+          fullscreen: !focused.state[WINDOW_STATE_FULLSCREEN](),
+          source: "keybind",
+          timestamp: Date.now(),
+        }, true);
+      }
+      return;
+    }
+  }
+
+  public dockOccluded(monitor: string, width: number, height: number): boolean {
+    const output = COMPOSITOR.output.current[monitor];
+    if (!output?.resolution) return false;
+    const left = output.position.x + (output.resolution.width / output.scale - width) / 2;
+    const bottom = output.position.y + output.resolution.height / output.scale;
+    const workspace = this.workspaceForMonitor(monitor);
+    return workspace?.listWindows().some((window) => {
+      if (window.state[WINDOW_STATE_MINIMIZED]()) return false;
+      const rect = window.state[WINDOW_STATE_RECT]();
+      return read(rect.x) < left + width && read(rect.x) + read(rect.width) > left &&
+        read(rect.y) < bottom && read(rect.y) + read(rect.height) > bottom - height;
+    }) ?? false;
+  }
+
+  public hasChromeFullscreen(monitor: string): boolean {
+    if (!COMPOSITOR.output.current[monitor]) return false;
+    return this.workspaceForMonitor(monitor)?.listWindows().some((window) =>
+      window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() &&
+      !window.state[WINDOW_STATE_MINIMIZED](),
+    ) ?? false;
+  }
+
+  public refreshUsableAreaLayouts() {
+    this.syncWorkspaces();
+    // While a window is being interactively dragged, do not re-apply the
+    // usable-area layout. It would clobber the in-flight drag — most visibly,
+    // a maximized window (which stays WINDOW_STATE_MAXIMIZED during the
+    // unmaximize-grab) gets snapped back to its full rect, flashing maximized
+    // whenever a layer surface mounts/unmounts (e.g. the snap-preview overlay).
+    // The layout is re-applied by the next layout event once the drag ends.
+    if (this.isGrabbing) {
+      return;
+    }
+    for (const workspace of this.workspaces.values()) {
+      workspace.refreshUsableAreaLayout();
+    }
+    this.syncWorkspaceVisibility();
+  }
+
+  public switchWorkspace(direction: -1 | 1) {
+    const monitor = this.currentMonitor || COMPOSITOR.output.list.at(0);
+    if (!monitor) {
+      return;
+    }
+    const currentIndex = this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+    this.switchWorkspaceTo(monitor, Math.max(1, currentIndex + direction));
+  }
+
+  /**
+   * Animated switch to a shared desktop across all outputs. Direction is
+   * inferred from the current index so the same vertical slide/fade transition
+   * as keyboard/gesture switching plays (used by the IPC `workspaces.activate`).
+   */
+  public switchWorkspaceTo(
+    monitor: string,
+    targetIndex: number,
+    options: { focusActiveAfter?: boolean; carryDraggedWindow?: boolean } = {},
+  ) {
+    this.workspaceGesture = null;
+    this.syncWorkspaces();
+    if (
+      !COMPOSITOR.output.list.includes(monitor) ||
+      !Number.isInteger(targetIndex) || targetIndex < 1
+    ) {
+      return;
+    }
+
+    this.currentMonitor = monitor;
+    // Switch the focused output last so other outputs cannot steal its focus.
+    for (const output of COMPOSITOR.output.list.filter((name) => name !== monitor)) {
+      this.switchWorkspaceOnMonitor(output, targetIndex, { focusActiveAfter: false });
+    }
+    const carryDrag = options.carryDraggedWindow !== false &&
+      this.isGrabbing && (this.floatingDrag !== null || this.tileDrag !== null);
+    this.switchWorkspaceOnMonitor(monitor, targetIndex,
+      carryDrag ? { focusActiveAfter: false } : options);
+    if (carryDrag) {
+      this.moveDraggedWindowToWorkspace(targetIndex);
+    }
+    this.workspaceChangeBroadcaster?.();
+  }
+
+  private moveDraggedWindowToWorkspace(targetIndex: number) {
+    const drag = this.floatingDrag ?? this.tileDrag;
+    if (!drag || drag.workspace.index === targetIndex) {
+      return;
+    }
+    const { window, workspace: fromWorkspace } = drag;
+    const toWorkspace = this.ensureWorkspace(fromWorkspace.monitor, targetIndex);
+    const rect = window.state[WINDOW_STATE_RECT]();
+
+    // Transfer during the key event, before the old desktop hides the grab.
+    // The dragged window stays under the pointer while other windows slide.
+    this.clearFloatingSnapPreview();
+    if (this.tileDrag) {
+      this.emitSnapPreview(fromWorkspace.monitor, null, "tiling");
+      fromWorkspace.removeTileDragWindow(window);
+    } else {
+      fromWorkspace.removeFloatingWindow(window);
+    }
+    fromWorkspace.applyLayout();
+    cancelWorkspaceVisualAnimation(window);
+
+    const nextDrag = { ...drag, workspace: toWorkspace };
+    if (toWorkspace.isTiled && toWorkspace.shouldTile(window)) {
+      toWorkspace.adoptTileDragWindow(window, rect);
+      this.tileDrag = nextDrag;
+      this.floatingDrag = null;
+      toWorkspace.updateTileDrag(window, rect,
+        this.lastPointerPosition?.x ?? read(rect.x),
+        this.lastPointerPosition?.y ?? read(rect.y));
+      this.emitSnapPreview(toWorkspace.monitor, toWorkspace.draggingSlotRect(), "tiling");
+    } else {
+      window.state[WINDOW_STATE_TILE_DRAGGING].set(false);
+      toWorkspace.adoptFloatingWindow(window, rect);
+      this.floatingDrag = nextDrag;
+      this.tileDrag = null;
+    }
+    this.applyWorkspaceStackPolicy(fromWorkspace);
+    this.applyWorkspaceStackPolicy(toWorkspace);
+    window.focus();
+  }
+
+  private switchWorkspaceOnMonitor(
+    monitor: string,
+    targetIndex: number,
+    options: { focusActiveAfter?: boolean } = {},
+  ) {
+    const currentIndex = this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+    if (targetIndex === currentIndex) {
+      return;
+    }
+    const direction: -1 | 1 = targetIndex > currentIndex ? 1 : -1;
+
+    const fromWorkspace = this.ensureWorkspace(monitor, currentIndex);
+    const toWorkspace = this.ensureWorkspace(monitor, targetIndex);
+    beginWorkspaceWave(monitor, direction);
+    this.activeWorkspaceByMonitor.set(monitor, targetIndex);
+
+    for (const workspace of this.workspaces.values()) {
+      if (
+        workspace.monitor !== monitor ||
+        workspace === fromWorkspace || workspace === toWorkspace
+      ) {
+        continue;
+      }
+      workspace.setVisible(workspace.isActive());
+    }
+
+    // The output snapshot retains the old desktop; render only the new live scene.
+    fromWorkspace.setVisible(false);
+    toWorkspace.setVisible(true);
+    if (!this.isGrabbing) toWorkspace.refreshUsableAreaLayout();
+    toWorkspace.applyLayout({ animate: false });
+    finishWorkspaceWave(monitor);
+    // Callers that explicitly want to focus a *different* window after the
+    // transition (e.g. dock activation) opt out of the implicit focus so the
+    // resulting onFocus callback chain does not stomp on their pan.
+    if (options.focusActiveAfter !== false) {
+      toWorkspace.focusActiveWindow();
+    }
+    this.applyWorkspaceStackPolicy(fromWorkspace);
+    this.applyWorkspaceStackPolicy(toWorkspace);
+  }
+
+  public getCurrentWorkspace(): Workspace | undefined {
+    this.syncWorkspaces();
+    return (
+      this.workspaceForMonitor(this.currentMonitor) ??
+      this.workspaces.values().next().value
+    );
+  }
+
+  /** Name (connector) of the monitor under the cursor; updated on pointer move. */
+  public getCurrentMonitorName(): string {
+    this.syncWorkspaces();
+    return this.currentMonitor || COMPOSITOR.output.list.at(0) || "";
+  }
+
+  /**
+   * Compact per-monitor workspace view for external clients (the bar) over IPC.
+   */
+  public viewForIpc(): WorkspacesView {
+    this.syncWorkspaces();
+
+    const byMonitor = new Map<string, WorkspacesViewWorkspace[]>();
+    for (const workspace of this.workspaces.values()) {
+      const active =
+        this.activeWorkspaceByMonitor.get(workspace.monitor) ===
+        workspace.index;
+      const list = byMonitor.get(workspace.monitor) ?? [];
+      const windows: WorkspacesViewWindow[] = workspace
+        .listWindows()
+        .map((window) => ({
+          id: window.id,
+          appId: window.appId(),
+          title: window.title(),
+          focused: window.isFocused(),
+          lastFocusedAt: this.lastFocusedAt.get(window.id) ?? 0,
+        }));
+      list.push({
+        index: workspace.index,
+        windowCount: workspace.windowCount(),
+        isTiled: workspace.isTiled,
+        active,
+        windows,
+      });
+      byMonitor.set(workspace.monitor, list);
+    }
+
+    const monitors: WorkspacesViewMonitor[] = COMPOSITOR.output.list.map(
+      (name) => {
+        const active = this.activeWorkspaceByMonitor.get(name) ?? 1;
+        // Keep the numbered desktops visible even when they are empty.
+        const workspaces = (byMonitor.get(name) ?? []).filter(
+          (workspace) =>
+            workspace.index <= PERSISTENT_WORKSPACE_COUNT ||
+            workspace.windowCount > 0 ||
+            workspace.active,
+        );
+        if (!workspaces.some((workspace) => workspace.index === active)) {
+          workspaces.push({
+            index: active,
+            windowCount: 0,
+            isTiled: false,
+            active: true,
+            windows: [],
+          });
+        }
+        workspaces.sort((a, b) => a.index - b.index);
+        return { name, active, workspaces };
+      },
+    );
+
+    return { currentMonitor: this.currentMonitor, monitors };
+  }
+
+  /**
+   * Update MRU stamp for `windowId`. The dock uses this to pick the "most
+   * recently used" window per app for left-click focus.
+   */
+  public recordFocus(windowId: string) {
+    this.lastFocusedAt.set(windowId, Date.now());
+  }
+
+  private trackPendingInitialFocus(window: WaylandWindow) {
+    const token = Date.now();
+    this.pendingInitialFocusByWindowId.set(window.id, token);
+    setTimeout(() => {
+      if (this.pendingInitialFocusByWindowId.get(window.id) === token) {
+        this.pendingInitialFocusByWindowId.delete(window.id);
+      }
+    }, WINDOW_MANAGEMENT_ANIMATION_DURATION);
+  }
+
+  private shouldDeferFocusLayoutForInitialOpen(
+    window: WaylandWindow,
+    workspace: Workspace | undefined,
+  ): boolean {
+    if (!workspace?.isTiled || !workspace.isActive()) {
+      return false;
+    }
+    if (this.pendingInitialFocusByWindowId.delete(window.id)) {
+      return false;
+    }
+    for (const pendingWindowId of this.pendingInitialFocusByWindowId.keys()) {
+      if (
+        workspace.isActiveWindowId(pendingWindowId) &&
+        workspace.findWindowById(pendingWindowId)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Find a managed window by id by scanning every workspace. Used by the
+   * `windows.activate` IPC handler to bridge bar clicks to focus + workspace
+   * switch.
+   */
+  public findWindowById(windowId: string): WaylandWindow | undefined {
+    for (const workspace of this.workspaces.values()) {
+      const found = workspace.findWindowById(windowId);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+
+  /** Every managed window across all workspaces (debug/IPC use). */
+  public listWindows(): WaylandWindow[] {
+    const windows: WaylandWindow[] = [];
+    for (const workspace of this.workspaces.values()) {
+      windows.push(...workspace.listWindows());
+    }
+    return windows;
+  }
+
+  /**
+   * Activate window by id (dock-style "go to this window"). Plays a unified
+   * sequence: unminimize → switch workspace (if different) → pan within the
+   * workspace so the target is centered → focus. Doing the pan synchronously
+   * here (instead of relying on the onFocus → focusWindow callback) gives the
+   * same in-sync animation as `Super+Ctrl+Left/Right` and guarantees a visible
+   * pan even when the target is already in the viewport.
+   *
+   * Returns true if the window existed.
+   */
+  public activateWindowById(windowId: string): boolean {
+    const window = this.findWindowById(windowId);
+    if (!window) {
+      return false;
+    }
+    const workspace = this.findWorkspaceForWindow(window);
+    if (!workspace) {
+      return false;
+    }
+
+    if (window.state[WINDOW_STATE_MINIMIZED]()) {
+      this.onWindowMinimizeRequest({
+        window,
+        minimized: false,
+        source: "api",
+        timestamp: Date.now(),
+      });
+    } else if (this.minimizeOnReactivate(window, workspace)) {
+      // Minimize-raise toggle: an IPC activation is always a dock/taskbar
+      // gesture, so re-activating the focused window minimizes it.
+      return true;
+    }
+
+    // Cross-workspace: switch first with the existing slide/fade. Skip the
+    // implicit focusActiveWindow — we explicitly focus the target below, and
+    // letting switchWorkspaceTo focus the previous active would queue an
+    // onFocus → focusWindow → applyLayout cycle that overrides our pan.
+    this.switchWorkspaceTo(workspace.monitor, workspace.index, {
+      focusActiveAfter: false,
+    });
+
+    // Always pan to the target inside the workspace (force-center even if it
+    // is already on-screen). This is the "go to this window" gesture.
+    if (workspace.isTiled) {
+      workspace.panToWindow(window);
+    }
+
+    this.lastRestoreAtMs.delete(window.id);
+    // Focus last so it overrides switchWorkspaceTo's focusActiveWindow().
+    window.focus();
+    return true;
+  }
+
+  /**
+   * Activate a specific workspace on a monitor (external/IPC entry point).
+   * Plays the same slide/fade transition as keyboard/gesture switching.
+   */
+  public activate(monitor: string, index: number) {
+    if (!monitor || index < 1) {
+      return;
+    }
+    this.switchWorkspaceTo(monitor, index);
+  }
+
+  public getWindowZIndex(window: WaylandWindow): ReadonlySignal<number> {
+    return this.windowStack.zIndex(window);
+  }
+
+  private beginInteractiveUnmaximize(window: WaylandWindow): boolean {
+    if (!window.state[WINDOW_STATE_MAXIMIZED]()) {
+      return false;
+    }
+
+    window.state[WINDOW_STATE_MAXIMIZED].set(false);
+    window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+    this.clearWindowSnapState(window);
+    window.unmaximize();
+    return true;
+  }
+
+  private applyWorkspaceStackPolicy(workspace: Workspace | undefined) {
+    if (!workspace) {
+      return;
+    }
+
+    if (!workspace.isTiled) {
+      // Floating workspaces stack purely by focus order, which `onFocus`
+      // already maintains. Raising `workspace.focusedWindow()` here instead
+      // reads the per-window focus *signals*, and those go stale between
+      // evaluations: while a new window's focused snapshot has arrived but
+      // the previous window's unfocused snapshot has not, both report
+      // focused and the OLD window wins — this ran during the new window's
+      // first-commit initialization and hoisted the previous window above
+      // the one being opened. The explicit tiling→floating restoration this
+      // used to provide lives in `restoreFloatingFocusStacking`, called from
+      // the toggle sites only.
+      return;
+    }
+
+    const floating = workspace
+      .floatingWindows()
+      .filter((window) => this.windowStack.has(window))
+      .sort(
+        (a, b) =>
+          this.windowStack.zIndexValue(a) - this.windowStack.zIndexValue(b),
+      );
+
+    for (const window of floating) {
+      this.windowStack.raise(window);
+    }
+  }
+
+  private syncWorkspaces() {
+    for (const monitor of COMPOSITOR.output.list) {
+      if (!this.activeWorkspaceByMonitor.has(monitor)) {
+        this.activeWorkspaceByMonitor.set(
+          monitor, this.activeWorkspaceByMonitor.get(this.currentMonitor) ?? 1,
+        );
+      }
+      for (let index = 1; index <= PERSISTENT_WORKSPACE_COUNT; index++) {
+        this.ensureWorkspace(monitor, index);
+      }
+      this.ensureWorkspace(
+        monitor,
+        this.activeWorkspaceByMonitor.get(monitor) ?? 1,
+      );
+    }
+
+    if (
+      !this.currentMonitor ||
+      !COMPOSITOR.output.list.includes(this.currentMonitor)
+    ) {
+      this.currentMonitor = COMPOSITOR.output.list.at(0) ?? "";
+    }
+  }
+
+  private workspaceForMonitor(monitor: string): Workspace | undefined {
+    if (!monitor) {
+      return undefined;
+    }
+    return this.ensureWorkspace(
+      monitor,
+      this.activeWorkspaceByMonitor.get(monitor) ?? 1,
+    );
+  }
+
+  private ensureWorkspace(monitor: string, index: number): Workspace {
+    const key = workspaceKey(monitor, index);
+    let workspace = this.workspaces.get(key);
+    if (!workspace) {
+      workspace = new Workspace(
+        index,
+        monitor,
+        this.naturalRootRect,
+        (window) => this.maximizedRectForWindow(window, monitor),
+        (monitor) => this.getActiveWorkspaceIndex(monitor),
+      );
+      this.workspaces.set(key, workspace);
+    }
+    return workspace;
+  }
+
+  private getActiveWorkspaceIndex(monitor: string): number {
+    return this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+  }
+
+  private gestureMonitor(event: GestureSwipeEvent): string {
+    const outputName = event.outputName;
+    if (outputName && COMPOSITOR.output.list.includes(outputName)) {
+      return outputName;
+    }
+    return this.currentMonitor || COMPOSITOR.output.list.at(0) || "";
+  }
+
+  private resolveWorkspaceGestureMode(
+    event: GestureSwipeEvent,
+  ): WorkspaceGestureMode | null {
+    if (this.workspaceGestureMode) {
+      return this.workspaceGestureMode;
+    }
+
+    const absX = Math.abs(event.totalX);
+    const absY = Math.abs(
+      event.totalY * this.workspaceGestureSpeed.workspaceSwitchFactor,
+    );
+    const scaledAbsX = absX * this.workspaceGestureSpeed.workspaceScrollFactor;
+    if (Math.max(scaledAbsX, absY) < WORKSPACE_GESTURE_AXIS_LOCK_PX) {
+      return null;
+    }
+
+    this.workspaceGestureMode =
+      scaledAbsX > absY ? "workspace-scroll" : "workspace-switch";
+    if (this.workspaceGestureMode === "workspace-scroll") {
+      this.workspaceScrollGestureRectAnimationsCancelled = false;
+    }
+    return this.workspaceGestureMode;
+  }
+
+  private updateWorkspaceScrollGesture(event: GestureSwipeEvent) {
+    const monitor = this.gestureMonitor(event);
+    const workspace = this.workspaceForMonitor(monitor);
+    if (!workspace?.isTiled) {
+      return;
+    }
+
+    this.currentMonitor = monitor;
+    workspace.stopKineticScroll();
+    let deltaX =
+      -event.deltaX * this.workspaceGestureSpeed.workspaceScrollFactor;
+
+    // Smooth the per-event scroll speed: libinput's instantaneous velocity is
+    // noisy, and one slow sample mid-flick must not fake a below-threshold
+    // catch.
+    const eventSpeed =
+      Math.abs(event.velocityX) *
+      this.workspaceGestureSpeed.workspaceScrollFactor;
+    this.workspaceScrollGestureSpeed =
+      this.workspaceScrollGestureSpeed === null
+        ? eventSpeed
+        : this.workspaceScrollGestureSpeed * 0.6 + eventSpeed * 0.4;
+
+    const latch = this.workspaceScrollSnapLatch;
+    if (latch) {
+      // Caught on a snap position: swallow finger travel until it exceeds
+      // the breakout distance, then resume with the excess.
+      latch.overshoot += deltaX;
+      const breakout = this.workspaceGestureSpeed.workspaceScrollSnapBreakoutPx;
+      if (Math.abs(latch.overshoot) <= breakout) {
+        return;
+      }
+      deltaX = latch.overshoot - Math.sign(latch.overshoot) * breakout;
+      this.workspaceScrollSnapLatch = null;
+    }
+
+    const snapMaxVelocity =
+      this.workspaceGestureSpeed.workspaceScrollSnapMaxVelocity;
+    if (
+      this.workspaceScrollSnapLatch === null &&
+      snapMaxVelocity > 0 &&
+      this.workspaceScrollGestureSpeed <= snapMaxVelocity
+    ) {
+      const from = workspace.scrollPosition;
+      const snapOffset = workspace.snapOffsetBetween(from, from + deltaX);
+      if (snapOffset !== null) {
+        deltaX = snapOffset - from;
+        this.workspaceScrollSnapLatch = { offset: snapOffset, overshoot: 0 };
+      }
+    }
+
+    const shouldCancelRectAnimations =
+      !this.workspaceScrollGestureRectAnimationsCancelled;
+    const scrolled = workspace.scrollBy(deltaX, {
+      stopKinetic: false,
+      cancelRectAnimations: shouldCancelRectAnimations,
+    });
+    if (scrolled && shouldCancelRectAnimations) {
+      this.workspaceScrollGestureRectAnimationsCancelled = true;
+    }
+    this.focusWindowAtPointerPosition(
+      event.position ?? this.lastPointerPosition,
+      monitor,
+    );
+    this.applyWorkspaceStackPolicy(workspace);
+  }
+
+  private finishWorkspaceScrollGesture(event: GestureSwipeEvent) {
+    if (event.phase !== "end") {
+      return;
+    }
+
+    const monitor = this.gestureMonitor(event);
+    const workspace = this.workspaceForMonitor(monitor);
+    if (!workspace?.isTiled) {
+      return;
+    }
+
+    // Fingers lifted while caught on a snap position: stay caught, no glide.
+    if (this.workspaceScrollSnapLatch) {
+      this.workspaceScrollSnapLatch = null;
+      this.workspaceScrollGestureSpeed = null;
+      return;
+    }
+    this.workspaceScrollGestureSpeed = null;
+
+    workspace.startKineticScroll(
+      -event.velocityX *
+        this.workspaceGestureSpeed.workspaceScrollKineticFactor,
+      () => {
+        this.focusWindowAtPointerPosition(
+          event.position ?? this.lastPointerPosition,
+          monitor,
+        );
+        this.applyWorkspaceStackPolicy(workspace);
+      },
+      this.workspaceGestureSpeed.workspaceScrollSnapMaxVelocity,
+    );
+  }
+
+  private updateWorkspaceGesture(event: GestureSwipeEvent) {
+    const monitor = this.gestureMonitor(event);
+    if (!monitor) {
+      return;
+    }
+
+    const distance = Math.max(1, this.workspaceTransitionDistance(monitor));
+    const scaledTotalY =
+      event.totalY * this.workspaceGestureSpeed.workspaceSwitchFactor;
+    const rawOffsetY = clamp(scaledTotalY, -distance, distance);
+    if (Math.abs(rawOffsetY) < 1) {
+      return;
+    }
+
+    const direction: -1 | 1 = rawOffsetY < 0 ? 1 : -1;
+    const currentIndex = this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+    const nextIndex = currentIndex + direction;
+    const fromWorkspace = this.ensureWorkspace(monitor, currentIndex);
+    const toWorkspace =
+      nextIndex >= 1 ? this.ensureWorkspace(monitor, nextIndex) : null;
+    const targetChanged =
+      this.workspaceGesture?.monitor !== monitor ||
+      this.workspaceGesture.currentIndex !== currentIndex ||
+      this.workspaceGesture.toWorkspace !== toWorkspace;
+
+    this.currentMonitor = monitor;
+
+    if (!toWorkspace) {
+      if (targetChanged) {
+        stopWorkspaceWave(monitor);
+        for (const workspace of this.workspaces.values()) {
+          if (workspace === fromWorkspace) {
+            continue;
+          }
+          workspace.setVisible(workspace.isActive());
+        }
+      }
+      const resistanceOffsetY = rawOffsetY * 0.25;
+      fromWorkspace.setWorkspaceGestureVisual(resistanceOffsetY, 1);
+      this.workspaceGesture = {
+        monitor,
+        currentIndex,
+        direction,
+        distance,
+        fromWorkspace,
+        toWorkspace: null,
+        fromOffsetY: resistanceOffsetY,
+        toOffsetY: direction * distance,
+        fromOpacity: 1,
+        toOpacity: 0,
+      };
+      return;
+    }
+
+    const progress = clamp(Math.abs(rawOffsetY) / distance, 0, 1);
+    const toOffsetY = direction * distance + rawOffsetY;
+    const fromOpacity = 1 - progress;
+    const toOpacity = progress;
+
+    if (targetChanged) {
+      beginWorkspaceWave(monitor, direction);
+      for (const workspace of this.workspaces.values()) {
+        if (workspace.monitor === monitor) workspace.setVisible(workspace === toWorkspace);
+      }
+      toWorkspace.applyLayout({ animate: false });
+    }
+
+    setWorkspaceWaveProgress(monitor, progress);
+    this.applyWorkspaceStackPolicy(fromWorkspace);
+    this.applyWorkspaceStackPolicy(toWorkspace);
+
+    this.workspaceGesture = {
+      monitor,
+      currentIndex,
+      direction,
+      distance,
+      fromWorkspace,
+      toWorkspace,
+      fromOffsetY: rawOffsetY,
+      toOffsetY,
+      fromOpacity,
+      toOpacity,
+    };
+  }
+
+  private finishWorkspaceGesture(event: GestureSwipeEvent) {
+    const gesture = this.workspaceGesture;
+    this.workspaceGesture = null;
+    if (!gesture) {
+      return;
+    }
+
+    const shouldCommit =
+      event.phase === "end" &&
+      gesture.toWorkspace !== null &&
+      (Math.abs(
+        event.totalY * this.workspaceGestureSpeed.workspaceSwitchFactor,
+      ) >=
+        gesture.distance * WORKSPACE_GESTURE_THRESHOLD_RATIO ||
+        Math.abs(
+          event.velocityY *
+            this.workspaceGestureSpeed.workspaceSwitchVelocityFactor,
+        ) >= WORKSPACE_GESTURE_VELOCITY_THRESHOLD);
+
+    if (shouldCommit && gesture.toWorkspace) {
+      this.activeWorkspaceByMonitor.set(
+        gesture.monitor,
+        gesture.currentIndex + gesture.direction,
+      );
+      this.currentMonitor = gesture.monitor;
+      gesture.fromWorkspace.setVisible(false);
+      gesture.toWorkspace.setVisible(true);
+      finishWorkspaceWave(gesture.monitor);
+      // The gesture already animated this output; commit the same desktop on the rest.
+      this.switchWorkspaceTo(gesture.monitor, gesture.toWorkspace.index, {
+        focusActiveAfter: false,
+      });
+      gesture.toWorkspace.focusActiveWindow();
+      this.applyWorkspaceStackPolicy(gesture.fromWorkspace);
+      this.applyWorkspaceStackPolicy(gesture.toWorkspace);
+      return;
+    }
+
+    if (gesture.toWorkspace) {
+      finishWorkspaceWave(gesture.monitor, false, () => {
+        gesture.fromWorkspace.setVisible(gesture.fromWorkspace.isActive());
+        gesture.toWorkspace?.setVisible(gesture.toWorkspace.isActive());
+      });
+    } else {
+      gesture.fromWorkspace.animateWorkspaceTransition({
+        fromOffsetY: gesture.fromOffsetY,
+        toOffsetY: 0,
+        fromOpacity: 1,
+        toOpacity: 1,
+        visibleAfter: true,
+      });
+    }
+    this.applyWorkspaceStackPolicy(gesture.fromWorkspace);
+  }
+
+  private focusWindowAtPointerTarget(
+    target: PointerMoveEvent["target"],
+    monitorHint?: string,
+  ) {
+    if (target.kind !== "window" || this.isGrabbing) {
+      return;
+    }
+
+    const workspace = Array.from(this.workspaces.values()).find((workspace) =>
+      workspace.findWindowById(target.windowId),
+    );
+    const window = workspace?.findWindowById(target.windowId);
+    if (!workspace || !window) {
+      return;
+    }
+
+    const focusOnOtherMonitor = Array.from(this.workspaces.values()).some(
+      (current) => current.monitor !== workspace.monitor &&
+        current.isActive() && current.focusedWindow() !== undefined,
+    );
+    if ((!workspace.isTiled && !focusOnOtherMonitor) || !workspace.isActive()) {
+      return;
+    }
+
+    const focused = workspace.focusWindowUnderPointer(window);
+    if (!focused) {
+      return;
+    }
+
+    this.currentMonitor =
+      monitorHint && COMPOSITOR.output.list.includes(monitorHint)
+        ? monitorHint
+        : workspace.monitor;
+  }
+
+  private focusWindowAtPointerPosition(
+    position: PointerMoveEvent["position"] | null | undefined,
+    monitorHint?: string,
+  ) {
+    if (!position || this.lastPointerTarget.kind === "layer") {
+      return;
+    }
+
+    const monitor =
+      monitorHint && COMPOSITOR.output.list.includes(monitorHint)
+        ? monitorHint
+        : (this.outputNameAt(position.x, position.y) ?? this.currentMonitor);
+    const workspace = this.workspaceForMonitor(monitor);
+    if (!workspace?.isTiled || !workspace.isActive()) {
+      return;
+    }
+
+    const window = workspace
+      .listWindows()
+      .filter(
+        (window) =>
+          !window.state[WINDOW_STATE_MINIMIZED]() &&
+          this.windowStack.has(window) &&
+          managedRectContainsPoint(
+            window.state[WINDOW_STATE_RECT](),
+            position.x,
+            position.y - window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y](),
+          ),
+      )
+      .sort(
+        (a, b) =>
+          this.windowStack.zIndexValue(b) - this.windowStack.zIndexValue(a),
+      )[0];
+    if (!window || !workspace.focusWindowUnderPointer(window)) {
+      return;
+    }
+    this.currentMonitor = monitor;
+  }
+
+  private availableWorkspaceIndex(monitor: string, preferredIndex: number) {
+    if (!this.workspaces.has(workspaceKey(monitor, preferredIndex))) {
+      return preferredIndex;
+    }
+    let index = 1;
+    while (this.workspaces.has(workspaceKey(monitor, index))) {
+      index += 1;
+    }
+    return index;
+  }
+
+  private syncWorkspaceVisibility() {
+    for (const workspace of this.workspaces.values()) {
+      workspace.setVisible(workspace.isActive());
+    }
+  }
+
+  private findWorkspaceForWindow(window: WaylandWindow): Workspace | undefined {
+    for (const workspace of this.workspaces.values()) {
+      if (workspace.hasWindow(window)) {
+        return workspace;
+      }
+    }
+    return undefined;
+  }
+
+  private findWorkspaceRestoringWindow(
+    window: WaylandWindow,
+  ): Workspace | undefined {
+    for (const workspace of this.workspaces.values()) {
+      if (workspace.isRestoringWindow(window.id)) {
+        return workspace;
+      }
+    }
+    return undefined;
+  }
+
+  private workspaceForTileDrag(
+    event: WindowMoveEvent,
+    drag: NonNullable<HybridWindowManager["tileDrag"]>,
+  ): Workspace {
+    const monitor =
+      event.outputName && COMPOSITOR.output.list.includes(event.outputName)
+        ? event.outputName
+        : drag.workspace.monitor;
+    let index = this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+    const edgeDirection = this.tileDragWorkspaceEdgeDirection(
+      monitor,
+      event.currentPointer.y,
+    );
+
+    if (
+      event.modifiers.shift &&
+      edgeDirection !== 0 &&
+      event.timestamp - drag.lastWorkspaceSwitchAt >=
+        TILE_DRAG_WORKSPACE_SWITCH_INTERVAL_MS
+    ) {
+      const nextIndex = Math.max(1, index + edgeDirection);
+      if (nextIndex !== index) {
+        this.currentMonitor = monitor;
+        // The move handler below performs its own transfer using this event.
+        this.switchWorkspaceTo(monitor, nextIndex, {
+          focusActiveAfter: false, carryDraggedWindow: false,
+        });
+        drag.lastWorkspaceSwitchAt = event.timestamp;
+        index = this.activeWorkspaceByMonitor.get(monitor) ?? nextIndex;
+      }
+    }
+
+    return this.ensureWorkspace(monitor, index);
+  }
+
+  private workspaceForFloatingDrag(
+    event: WindowMoveEvent,
+    drag: NonNullable<HybridWindowManager["floatingDrag"]>,
+  ): Workspace {
+    const monitor =
+      event.outputName && COMPOSITOR.output.list.includes(event.outputName)
+        ? event.outputName
+        : drag.workspace.monitor;
+    let index = this.activeWorkspaceByMonitor.get(monitor) ?? 1;
+    const edgeDirection = this.tileDragWorkspaceEdgeDirection(
+      monitor,
+      event.currentPointer.y,
+    );
+
+    if (
+      event.modifiers.shift &&
+      edgeDirection !== 0 &&
+      event.timestamp - drag.lastWorkspaceSwitchAt >=
+        TILE_DRAG_WORKSPACE_SWITCH_INTERVAL_MS
+    ) {
+      const nextIndex = Math.max(1, index + edgeDirection);
+      if (nextIndex !== index) {
+        this.currentMonitor = monitor;
+        // The move handler below performs its own transfer using this event.
+        this.switchWorkspaceTo(monitor, nextIndex, {
+          focusActiveAfter: false, carryDraggedWindow: false,
+        });
+        drag.lastWorkspaceSwitchAt = event.timestamp;
+        index = this.activeWorkspaceByMonitor.get(monitor) ?? nextIndex;
+      }
+    }
+
+    return this.ensureWorkspace(monitor, index);
+  }
+
+  private tileDragWorkspaceEdgeDirection(
+    monitor: string,
+    y: number,
+  ): -1 | 0 | 1 {
+    const rect = this.workspaceViewportRect(monitor);
+    const top = read(rect.y);
+    const height = read(rect.height);
+    if (y < top + TILE_DRAG_WORKSPACE_EDGE_PX) {
+      return -1;
+    }
+    if (y > top + height - TILE_DRAG_WORKSPACE_EDGE_PX) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private workspaceTransitionDistance(monitor: string): number {
+    return read(this.workspaceViewportRect(monitor).height);
+  }
+
+  private workspaceViewportRect(monitor: string): ManagedWindowRect {
+    const usable = COMPOSITOR.layer.usableArea(monitor);
+    if (usable) {
+      return usable;
+    }
+
+    const output = COMPOSITOR.output.current[monitor];
+    if (output?.resolution) {
+      return {
+        x: output.position.x,
+        y: output.position.y,
+        width: output.resolution.width / output.scale,
+        height: output.resolution.height / output.scale,
+      };
+    }
+
+    return {
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 720,
+    };
+  }
+
+  private constrainResizeRect(event: WindowResizeEvent): ManagedWindowRect {
+    const constraints = event.window.sizeConstraints();
+    const extra = this.clientToRootSizeExtra(event.window);
+    const minWidth = Math.max(1, constraints.min?.width ?? 1) + extra.width;
+    const minHeight = Math.max(1, constraints.min?.height ?? 1) + extra.height;
+    const maxWidth = constrainedMax(constraints, "width", extra.width);
+    const maxHeight = constrainedMax(constraints, "height", extra.height);
+
+    const width = clamp(
+      event.currentRect.width,
+      minWidth,
+      Math.max(minWidth, maxWidth),
+    );
+    const height = clamp(
+      event.currentRect.height,
+      minHeight,
+      Math.max(minHeight, maxHeight),
+    );
+
+    return {
+      x: resizeOriginForAxis(
+        event.startRect,
+        event.currentRect,
+        width,
+        event.edges.left,
+        "x",
+      ),
+      y: resizeOriginForAxis(
+        event.startRect,
+        event.currentRect,
+        height,
+        event.edges.top,
+        "y",
+      ),
+      width,
+      height,
+    };
+  }
+
+  private clientToRootSizeExtra(window: WaylandWindow): {
+    width: number;
+    height: number;
+  } {
+    const natural = this.naturalRootRect(window);
+    return {
+      width: Math.max(0, read(natural.width) - window.position.width),
+      height: Math.max(0, read(natural.height) - window.position.height),
+    };
+  }
+
+  private maximizedRectForWindow(
+    window: WaylandWindow,
+    preferredOutput?: string,
+  ): ManagedWindowRect {
+    const rect = window.state[WINDOW_STATE_RECT]();
+    const centerX = read(rect.x) + read(rect.width) / 2;
+    const centerY = read(rect.y) + read(rect.height) / 2;
+    const outputName =
+      preferredOutput ??
+      this.outputNameAt(centerX, centerY) ??
+      this.currentMonitor;
+    const output = outputName
+      ? COMPOSITOR.output.current[outputName]
+      : undefined;
+    const usable = outputName
+      ? COMPOSITOR.layer.usableArea(outputName)
+      : undefined;
+
+    if (usable) {
+      return insetRect(
+        {
+          x: usable.x,
+          y: usable.y,
+          width: usable.width,
+          height: usable.height,
+        },
+        MAXIMIZED_WINDOW_PADDING,
+      );
+    }
+    if (output?.resolution) {
+      return insetRect(
+        {
+          x: output.position.x,
+          y: output.position.y,
+          width: output.resolution.width / output.scale,
+          height: output.resolution.height / output.scale,
+        },
+        MAXIMIZED_WINDOW_PADDING,
+      );
+    }
+    return rect;
+  }
+
+  // Fullscreen covers the entire output: unlike maximize it ignores the
+  // usable area (exclusive-zone bars) and applies no padding, so the client
+  // surface spans edge to edge. This is also what lets the tty backend
+  // collapse the frame to a single scanout-capable element.
+  private fullscreenRectForWindow(
+    window: WaylandWindow,
+    preferredOutput?: string,
+  ): ManagedWindowRect {
+    const rect = window.state[WINDOW_STATE_RECT]();
+    const centerX = read(rect.x) + read(rect.width) / 2;
+    const centerY = read(rect.y) + read(rect.height) / 2;
+    const outputName =
+      preferredOutput ??
+      this.outputNameAt(centerX, centerY) ??
+      this.currentMonitor;
+    const output = outputName
+      ? COMPOSITOR.output.current[outputName]
+      : undefined;
+    if (output?.resolution) {
+      return {
+        x: output.position.x,
+        y: output.position.y,
+        width: output.resolution.width / output.scale,
+        height: output.resolution.height / output.scale,
+      };
+    }
+    return rect;
+  }
+
+  public onWindowFullscreenRequest(event: WindowFullscreenRequestEvent, withChrome = false) {
+    if (this.isGrabbing) {
+      return;
+    }
+    const window = event.window;
+    const workspace = this.findWorkspaceForWindow(window);
+    window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(event.fullscreen && withChrome);
+    markWindowCompositionDirty(window);
+    window.state[WINDOW_STATE_MINIMIZED].set(false);
+    this.clearWindowSnapState(window);
+
+    if (!event.fullscreen) {
+      const restoreRect = window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
+      window.state[WINDOW_STATE_FULLSCREEN].set(false);
+      window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(null);
+      // A tiled window returns to its computed slot; a floating one animates
+      // back to where it was before going fullscreen.
+      if (workspace?.isTiled && workspace.shouldTile(window)) {
+        workspace.applyLayout();
+        this.applyWorkspaceStackPolicy(workspace);
+        return;
+      }
+      // A window that was (or became) maximized while fullscreen goes back
+      // to the maximized rect, not to the rect it had before maximizing.
+      const targetRect = window.state[WINDOW_STATE_MAXIMIZED]()
+        ? this.maximizedRectForWindow(window)
+        : restoreRect;
+      if (targetRect) {
+        workspace?.syncFloatingWindowRect(window, targetRect);
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          targetRect,
+          WINDOW_MANAGEMENT_EASING,
+          WINDOW_MANAGEMENT_ANIMATION_DURATION,
+        );
+      }
+      this.applyWorkspaceStackPolicy(workspace);
+      return;
+    }
+
+    if (!window.state[WINDOW_STATE_FULLSCREEN]()) {
+      const currentRect = window.state[WINDOW_STATE_RECT]();
+      const currentWidth = read(currentRect.width);
+      const currentHeight = read(currentRect.height);
+      if (currentWidth > 1 && currentHeight > 1) {
+        window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(currentRect);
+      }
+    }
+    const fullscreenRect = this.fullscreenRectForWindow(
+      window,
+      event.outputName,
+    );
+    window.state[WINDOW_STATE_FULLSCREEN].set(true);
+    workspace?.focusWindow(window);
+    workspace?.syncFloatingWindowRect(window, fullscreenRect);
+    playRectAnimation(
+      window,
+      WINDOW_STATE_RECT,
+      fullscreenRect,
+      WINDOW_MANAGEMENT_EASING,
+      WINDOW_MANAGEMENT_ANIMATION_DURATION,
+    );
+    this.applyWorkspaceStackPolicy(workspace);
+    window.focus();
+  }
+
+  private initialRestoreRectForMaximizedWindow(
+    window: WaylandWindow,
+  ): ManagedWindowRect {
+    const maximizedRect = this.maximizedRectForWindow(window);
+    const width = Math.max(1, read(maximizedRect.width) * 0.7);
+    const height = Math.max(1, read(maximizedRect.height) * 0.7);
+    return {
+      x: read(maximizedRect.x) + (read(maximizedRect.width) - width) / 2,
+      y: read(maximizedRect.y) + (read(maximizedRect.height) - height) / 2,
+      width,
+      height,
+    };
+  }
+
+  private restoreRectForMaximizedMove(
+    event: WindowMoveEvent,
+    width: number,
+    height: number,
+  ): ManagedWindowRect {
+    const pointer = event.currentPointer;
+    const titlebarCenterY = WINDOW_BORDER_PX + TITLEBAR_HEIGHT / 2;
+    const pointerOffsetY =
+      event.source === "modifier"
+        ? height / 2
+        : Math.min(height / 2, titlebarCenterY);
+
+    return {
+      x: pointer.x - width / 2,
+      y: pointer.y - pointerOffsetY,
+      width,
+      height,
+    };
+  }
+
+  private outputNameAt(x: number, y: number): string | undefined {
+    for (const name of COMPOSITOR.output.list) {
+      const output = COMPOSITOR.output.current[name];
+      if (!output?.resolution) {
+        continue;
+      }
+      const width = output.resolution.width / output.scale;
+      const height = output.resolution.height / output.scale;
+      if (
+        x >= output.position.x &&
+        y >= output.position.y &&
+        x < output.position.x + width &&
+        y < output.position.y + height
+      ) {
+        return name;
+      }
+    }
+    return undefined;
+  }
+
+  // -------------------------------------------------------------------------
+  // Snap zones (Windows-style edge snapping for floating drags + tiling drag
+  // slot preview). The bar renders the preview rect; this side decides the
+  // zone, broadcasts the preview, and applies the snap on drop.
+  // -------------------------------------------------------------------------
+
+  public setSnapPreviewBroadcaster(broadcaster: SnapPreviewBroadcaster | null) {
+    this.snapPreviewBroadcaster = broadcaster;
+  }
+
+  public setWorkspaceChangeBroadcaster(
+    broadcaster: WorkspaceChangeBroadcaster | null,
+  ) {
+    this.workspaceChangeBroadcaster = broadcaster;
+  }
+
+  /** Full logical rect of a monitor (ignores reserved insets). */
+  private monitorFullRect(monitor: string): ManagedWindowRect | null {
+    const output = COMPOSITOR.output.current[monitor];
+    if (!output?.resolution) {
+      return null;
+    }
+    return {
+      x: output.position.x,
+      y: output.position.y,
+      width: output.resolution.width / output.scale,
+      height: output.resolution.height / output.scale,
+    };
+  }
+
+  /** Usable area inset by the maximized padding — the base for all snap rects. */
+  private monitorSnapBaseRect(monitor: string): ManagedWindowRect | null {
+    const usable =
+      COMPOSITOR.layer.usableArea(monitor) ?? this.monitorFullRect(monitor);
+    if (!usable) {
+      return null;
+    }
+    return insetRect(usable, MAXIMIZED_WINDOW_PADDING);
+  }
+
+  /** Resolve the snap zone for a pointer near the physical screen edges. */
+  private floatingSnapZoneAt(
+    monitor: string,
+    px: number,
+    py: number,
+  ): SnapZone | null {
+    const full = this.monitorFullRect(monitor);
+    if (!full) {
+      return null;
+    }
+    const left = read(full.x);
+    const top = read(full.y);
+    const right = left + read(full.width);
+    const bottom = top + read(full.height);
+
+    const nearLeft = px <= left + SNAP_EDGE_PX;
+    const nearRight = px >= right - SNAP_EDGE_PX;
+    const nearTop = py <= top + SNAP_EDGE_PX;
+
+    // Corners win over edges so the quarters stay reachable.
+    if (nearLeft && py <= top + SNAP_CORNER_PX) return "top-left";
+    if (nearLeft && py >= bottom - SNAP_CORNER_PX) return "bottom-left";
+    if (nearRight && py <= top + SNAP_CORNER_PX) return "top-right";
+    if (nearRight && py >= bottom - SNAP_CORNER_PX) return "bottom-right";
+    if (nearTop) return "maximize";
+    if (nearLeft) return "left";
+    if (nearRight) return "right";
+    return null;
+  }
+
+  /** Target rect (global logical coords) for a snap zone on a monitor. */
+  private snapZoneRect(
+    monitor: string,
+    zone: SnapZone,
+  ): ManagedWindowRect | null {
+    const base = this.monitorSnapBaseRect(monitor);
+    if (!base) {
+      return null;
+    }
+    const bx = read(base.x);
+    const by = read(base.y);
+    const bw = read(base.width);
+    const bh = read(base.height);
+    const halfW = (bw - SNAP_GAP_PX) / 2;
+    const halfH = (bh - SNAP_GAP_PX) / 2;
+    const rightX = bx + halfW + SNAP_GAP_PX;
+    const bottomY = by + halfH + SNAP_GAP_PX;
+
+    switch (zone) {
+      case "maximize":
+        return { x: bx, y: by, width: bw, height: bh };
+      case "left":
+        return { x: bx, y: by, width: halfW, height: bh };
+      case "right":
+        return { x: rightX, y: by, width: halfW, height: bh };
+      case "top-left":
+        return { x: bx, y: by, width: halfW, height: halfH };
+      case "top-right":
+        return { x: rightX, y: by, width: halfW, height: halfH };
+      case "bottom-left":
+        return { x: bx, y: bottomY, width: halfW, height: halfH };
+      case "bottom-right":
+        return { x: rightX, y: bottomY, width: halfW, height: halfH };
+    }
+  }
+
+  private resizeFloatingSnapLayout(
+    event: WindowResizeEvent,
+    workspace: Workspace,
+    nextRect: ManagedWindowRect,
+  ): boolean {
+    if (workspace.isTiled) {
+      return false;
+    }
+
+    const zone = event.window.state[WINDOW_STATE_SNAP_ZONE]();
+    if (!isLayoutSnapZone(zone)) {
+      return false;
+    }
+
+    const monitor =
+      event.window.state[WINDOW_STATE_SNAP_MONITOR]() || workspace.monitor;
+    const base = this.monitorSnapBaseRect(monitor);
+    if (!base) {
+      return false;
+    }
+
+    const snappedWindows = workspace
+      .listWindows()
+      .filter((window) => this.isWindowInFloatingSnapLayout(window, monitor));
+    if (!snappedWindows.some((window) => window.id === event.window.id)) {
+      return false;
+    }
+
+    const layout = this.floatingSnapLayoutFromWindows(base, snappedWindows);
+    let changed = false;
+
+    if (event.edges.right && isLeftSnapZone(zone)) {
+      layout.splitX = read(nextRect.x) + read(nextRect.width);
+      changed = true;
+    } else if (event.edges.left && isRightSnapZone(zone)) {
+      layout.splitX = read(nextRect.x) - SNAP_GAP_PX;
+      changed = true;
+    }
+
+    if (event.edges.bottom && isTopSnapZone(zone)) {
+      if (snapColumn(zone) === "left") {
+        layout.leftSplitY = read(nextRect.y) + read(nextRect.height);
+      } else {
+        layout.rightSplitY = read(nextRect.y) + read(nextRect.height);
+      }
+      changed = true;
+    } else if (event.edges.top && isBottomSnapZone(zone)) {
+      if (snapColumn(zone) === "left") {
+        layout.leftSplitY = read(nextRect.y) - SNAP_GAP_PX;
+      } else {
+        layout.rightSplitY = read(nextRect.y) - SNAP_GAP_PX;
+      }
+      changed = true;
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    this.clampFloatingSnapLayout(base, layout, snappedWindows);
+    this.applyFloatingSnapLayout(base, layout, snappedWindows);
+    return true;
+  }
+
+  private isWindowInFloatingSnapLayout(
+    window: WaylandWindow,
+    monitor: string,
+  ): boolean {
+    return (
+      isLayoutSnapZone(window.state[WINDOW_STATE_SNAP_ZONE]()) &&
+      window.state[WINDOW_STATE_SNAP_MONITOR]() === monitor &&
+      !window.state[WINDOW_STATE_MINIMIZED]() &&
+      !window.state[WINDOW_STATE_MAXIMIZED]()
+    );
+  }
+
+  private floatingSnapLayoutFromWindows(
+    base: ManagedWindowRect,
+    windows: WaylandWindow[],
+  ): FloatingSnapLayout {
+    const bx = read(base.x);
+    const by = read(base.y);
+    const bw = read(base.width);
+    const bh = read(base.height);
+    const defaultSplitX = bx + (bw - SNAP_GAP_PX) / 2;
+    const defaultSplitY = by + (bh - SNAP_GAP_PX) / 2;
+    const splitXSamples: number[] = [];
+    const leftSplitYSamples: number[] = [];
+    const rightSplitYSamples: number[] = [];
+
+    for (const window of windows) {
+      const zone = window.state[WINDOW_STATE_SNAP_ZONE]();
+      if (!isLayoutSnapZone(zone)) {
+        continue;
+      }
+      const rect = window.state[WINDOW_STATE_RECT]();
+      if (isLeftSnapZone(zone)) {
+        splitXSamples.push(read(rect.x) + read(rect.width));
+      } else {
+        splitXSamples.push(read(rect.x) - SNAP_GAP_PX);
+      }
+
+      if (isTopSnapZone(zone)) {
+        const samples =
+          snapColumn(zone) === "left" ? leftSplitYSamples : rightSplitYSamples;
+        samples.push(read(rect.y) + read(rect.height));
+      } else if (isBottomSnapZone(zone)) {
+        const samples =
+          snapColumn(zone) === "left" ? leftSplitYSamples : rightSplitYSamples;
+        samples.push(read(rect.y) - SNAP_GAP_PX);
+      }
+    }
+
+    return {
+      splitX: averageOr(splitXSamples, defaultSplitX),
+      leftSplitY: averageOr(leftSplitYSamples, defaultSplitY),
+      rightSplitY: averageOr(rightSplitYSamples, defaultSplitY),
+    };
+  }
+
+  private clampFloatingSnapLayout(
+    base: ManagedWindowRect,
+    layout: FloatingSnapLayout,
+    windows: WaylandWindow[],
+  ): void {
+    const bx = read(base.x);
+    const by = read(base.y);
+    const bw = read(base.width);
+    const bh = read(base.height);
+    const groups = this.floatingSnapMinSizeGroups(windows);
+
+    layout.splitX = clamp(
+      layout.splitX,
+      bx + groups.leftWidth,
+      bx + bw - SNAP_GAP_PX - groups.rightWidth,
+    );
+    layout.leftSplitY = clamp(
+      layout.leftSplitY,
+      by + groups.leftTopHeight,
+      by + bh - SNAP_GAP_PX - groups.leftBottomHeight,
+    );
+    layout.rightSplitY = clamp(
+      layout.rightSplitY,
+      by + groups.rightTopHeight,
+      by + bh - SNAP_GAP_PX - groups.rightBottomHeight,
+    );
+  }
+
+  private floatingSnapMinSizeGroups(windows: WaylandWindow[]): {
+    leftWidth: number;
+    rightWidth: number;
+    leftTopHeight: number;
+    leftBottomHeight: number;
+    rightTopHeight: number;
+    rightBottomHeight: number;
+  } {
+    const groups = {
+      leftWidth: 1,
+      rightWidth: 1,
+      leftTopHeight: 1,
+      leftBottomHeight: 1,
+      rightTopHeight: 1,
+      rightBottomHeight: 1,
+    };
+
+    for (const window of windows) {
+      const zone = window.state[WINDOW_STATE_SNAP_ZONE]();
+      if (!isLayoutSnapZone(zone)) {
+        continue;
+      }
+
+      const minSize = this.floatingSnapMinSize(window);
+      if (isLeftSnapZone(zone)) {
+        groups.leftWidth = Math.max(groups.leftWidth, minSize.width);
+      } else {
+        groups.rightWidth = Math.max(groups.rightWidth, minSize.width);
+      }
+
+      if (isTopSnapZone(zone)) {
+        if (snapColumn(zone) === "left") {
+          groups.leftTopHeight = Math.max(groups.leftTopHeight, minSize.height);
+        } else {
+          groups.rightTopHeight = Math.max(
+            groups.rightTopHeight,
+            minSize.height,
+          );
+        }
+      } else if (isBottomSnapZone(zone)) {
+        if (snapColumn(zone) === "left") {
+          groups.leftBottomHeight = Math.max(
+            groups.leftBottomHeight,
+            minSize.height,
+          );
+        } else {
+          groups.rightBottomHeight = Math.max(
+            groups.rightBottomHeight,
+            minSize.height,
+          );
+        }
+      }
+    }
+
+    return groups;
+  }
+
+  private floatingSnapMinSize(window: WaylandWindow): {
+    width: number;
+    height: number;
+  } {
+    const constraints = window.sizeConstraints();
+    const extra = this.clientToRootSizeExtra(window);
+    return {
+      width: Math.max(1, constraints.min?.width ?? 1) + extra.width,
+      height: Math.max(1, constraints.min?.height ?? 1) + extra.height,
+    };
+  }
+
+  private applyFloatingSnapLayout(
+    base: ManagedWindowRect,
+    layout: FloatingSnapLayout,
+    windows: WaylandWindow[],
+  ): void {
+    for (const window of windows) {
+      const zone = window.state[WINDOW_STATE_SNAP_ZONE]();
+      if (!isLayoutSnapZone(zone)) {
+        continue;
+      }
+
+      const rect = this.floatingSnapRectForZone(base, layout, zone);
+      stopRectAnimation(window, WINDOW_STATE_RECT);
+      window.state[WINDOW_STATE_RECT].set(rect);
+    }
+  }
+
+  private floatingSnapRectForZone(
+    base: ManagedWindowRect,
+    layout: FloatingSnapLayout,
+    zone: LayoutSnapZone,
+  ): ManagedWindowRect {
+    const bx = read(base.x);
+    const by = read(base.y);
+    const bw = read(base.width);
+    const bh = read(base.height);
+    const rightX = layout.splitX + SNAP_GAP_PX;
+    const leftWidth = Math.max(1, layout.splitX - bx);
+    const rightWidth = Math.max(1, bx + bw - rightX);
+
+    switch (zone) {
+      case "left":
+        return { x: bx, y: by, width: leftWidth, height: bh };
+      case "right":
+        return { x: rightX, y: by, width: rightWidth, height: bh };
+      case "top-left":
+        return {
+          x: bx,
+          y: by,
+          width: leftWidth,
+          height: Math.max(1, layout.leftSplitY - by),
+        };
+      case "bottom-left": {
+        const y = layout.leftSplitY + SNAP_GAP_PX;
+        return {
+          x: bx,
+          y,
+          width: leftWidth,
+          height: Math.max(1, by + bh - y),
+        };
+      }
+      case "top-right":
+        return {
+          x: rightX,
+          y: by,
+          width: rightWidth,
+          height: Math.max(1, layout.rightSplitY - by),
+        };
+      case "bottom-right": {
+        const y = layout.rightSplitY + SNAP_GAP_PX;
+        return {
+          x: rightX,
+          y,
+          width: rightWidth,
+          height: Math.max(1, by + bh - y),
+        };
+      }
+    }
+  }
+
+  private setWindowSnapState(
+    workspace: Workspace | undefined,
+    window: WaylandWindow,
+    monitor: string,
+    zone: LayoutSnapZone,
+  ): void {
+    if (workspace) {
+      for (const other of workspace.listWindows()) {
+        if (other.id === window.id) {
+          continue;
+        }
+        if (
+          other.state[WINDOW_STATE_SNAP_MONITOR]() === monitor &&
+          snapZonesConflict(other.state[WINDOW_STATE_SNAP_ZONE](), zone)
+        ) {
+          this.clearWindowSnapState(other);
+        }
+      }
+    }
+
+    window.state[WINDOW_STATE_SNAP_ZONE].set(zone);
+    window.state[WINDOW_STATE_SNAP_MONITOR].set(monitor);
+  }
+
+  private clearWindowSnapState(window: WaylandWindow): void {
+    window.state[WINDOW_STATE_SNAP_ZONE].set(null);
+    window.state[WINDOW_STATE_SNAP_MONITOR].set(null);
+  }
+
+  /** Broadcast a preview rect (converted to monitor-local) or a hide (null). */
+  private emitSnapPreview(
+    monitor: string,
+    rect: ManagedWindowRect | null,
+    kind: "floating" | "tiling",
+  ) {
+    if (!this.snapPreviewBroadcaster) {
+      return;
+    }
+    if (!rect) {
+      this.snapPreviewBroadcaster({ monitor, rect: null, kind });
+      return;
+    }
+    const output = COMPOSITOR.output.current[monitor];
+    const ox = output?.position.x ?? 0;
+    const oy = output?.position.y ?? 0;
+    this.snapPreviewBroadcaster({
+      monitor,
+      kind,
+      rect: {
+        x: read(rect.x) - ox,
+        y: read(rect.y) - oy,
+        width: read(rect.width),
+        height: read(rect.height),
+      },
+    });
+  }
+
+  /** Update the floating-drag snap candidate + preview during a move. */
+  private updateFloatingDragSnap(event: WindowMoveEvent) {
+    if (event.modifiers.shift) {
+      this.clearFloatingSnapPreview();
+      return;
+    }
+    if (event.phase === "start") {
+      this.clearFloatingSnapPreview();
+      return;
+    }
+    if (event.phase === "end" || event.phase === "cancel") {
+      return;
+    }
+
+    const monitor =
+      event.outputName && COMPOSITOR.output.list.includes(event.outputName)
+        ? event.outputName
+        : this.currentMonitor;
+    const zone = monitor
+      ? this.floatingSnapZoneAt(
+          monitor,
+          event.currentPointer.x,
+          event.currentPointer.y,
+        )
+      : null;
+
+    if (!monitor || !zone) {
+      this.clearFloatingSnapPreview();
+      return;
+    }
+
+    const rect = this.snapZoneRect(monitor, zone);
+    if (!rect) {
+      this.clearFloatingSnapPreview();
+      return;
+    }
+    if (
+      this.floatingSnap &&
+      (this.floatingSnap.windowId !== event.window.id ||
+        this.floatingSnap.monitor !== monitor)
+    ) {
+      this.emitSnapPreview(this.floatingSnap.monitor, null, "floating");
+    }
+    this.floatingSnap = { windowId: event.window.id, monitor, zone, rect };
+    this.emitSnapPreview(monitor, rect, "floating");
+  }
+
+  private clearFloatingSnapPreview() {
+    if (!this.floatingSnap) {
+      return;
+    }
+    this.emitSnapPreview(this.floatingSnap.monitor, null, "floating");
+    this.floatingSnap = null;
+  }
+
+  /**
+   * Apply the pending snap on drop (or clear it on cancel). Returns true if the
+   * window was snapped, so the caller skips leaving it at the drop position.
+   */
+  private finishFloatingDragSnap(
+    event: WindowMoveEvent,
+    workspace: Workspace | undefined,
+  ): boolean {
+    if (event.modifiers.shift) {
+      this.clearFloatingSnapPreview();
+      return false;
+    }
+    const snap = this.floatingSnap;
+    this.floatingSnap = null;
+    if (!snap || snap.windowId !== event.window.id) {
+      if (snap) {
+        this.emitSnapPreview(snap.monitor, null, "floating");
+      }
+      return false;
+    }
+
+    this.emitSnapPreview(snap.monitor, null, "floating");
+    if (event.phase !== "end") {
+      return false;
+    }
+
+    const window = event.window;
+    const isMaximized = window.state[WINDOW_STATE_MAXIMIZED]();
+
+    if (snap.zone === "maximize") {
+      this.clearWindowSnapState(window);
+      // Route through the real maximize so the compositor `isMaximized` state
+      // (and therefore the SSD maximize/restore icon) stays in sync. Calling
+      // maximize() fires onWindowMaximizeRequest, which applies the rect.
+      if (!isMaximized) {
+        window.maximize();
+      } else {
+        // Already maximized (e.g. re-dropped on the top edge): just re-apply
+        // the maximized rect for the monitor under the cursor.
+        const rect = this.maximizedRectForWindow(window);
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          rect,
+          WINDOW_MANAGEMENT_EASING,
+          WINDOW_MANAGEMENT_ANIMATION_DURATION,
+        );
+        workspace?.syncFloatingWindowRect(window, rect);
+      }
+    } else {
+      // Half / quarter: ensure the window is unmaximized first (syncs the SSD
+      // icon), with the restore rect cleared so unmaximize() does not animate
+      // back to it and fight the snap, then place it at the zone rect.
+      if (isMaximized) {
+        window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+        window.state[WINDOW_STATE_MAXIMIZED].set(false);
+        window.unmaximize();
+      }
+      playRectAnimation(
+        window,
+        WINDOW_STATE_RECT,
+        snap.rect,
+        WINDOW_MANAGEMENT_EASING,
+        WINDOW_MANAGEMENT_ANIMATION_DURATION,
+      );
+      this.setWindowSnapState(workspace, window, snap.monitor, snap.zone);
+      workspace?.syncFloatingWindowRect(window, snap.rect);
+    }
+    this.applyWorkspaceStackPolicy(workspace);
+    return true;
+  }
+}
+
+export class Workspace {
+  public index: number;
+  private readonly windows: WaylandWindow[] = [];
+  private readonly naturalRootRect: (
+    window: WaylandWindow,
+  ) => ManagedWindowRect;
+  private readonly maximizedRootRect: (
+    window: WaylandWindow,
+  ) => ManagedWindowRect;
+  private readonly activeWorkspaceIndex: (monitor: string) => number;
+  private readonly tileWidthByWindowId = new Map<string, number>();
+  private readonly exitLayoutHolds = new Map<string, () => void>();
+  private readonly restoredWindowStateById = new Map<
+    string,
+    WorkspaceWindowSnapshot
+  >();
+  private activeWindowId: string | null = null;
+  private visibilityAnimationToken = 0;
+  private draggingWindowId: string | null = null;
+  // Layout slot reserved for the tile being dragged (the gap opened in the row).
+  // Captured during applyLayout so the bar can preview where the tile will land.
+  private lastDraggingSlotRect: ManagedWindowRect | null = null;
+  private lastAppliedTileViewportRect: ManagedWindowRect | null = null;
+  private scrollOffset = 0;
+  private readonly initialTileStateByWindowId = new Map<
+    string,
+    {
+      scrollOffset: number;
+      activeWindowId: string | null;
+      token: number;
+    }
+  >();
+  private initialTileStateToken = 0;
+  private readonly tileReorderTokenByWindowId = new Map<string, number>();
+  private tileReorderToken = 0;
+  private kineticScrollPoll: PollHandle | null = null;
+  private kineticScrollToken = 0;
+  public monitor: string;
+  public isTiled = false;
+
+  public constructor(
+    index: number,
+    monitor: string,
+    naturalRootRect: (window: WaylandWindow) => ManagedWindowRect,
+    maximizedRootRect: (window: WaylandWindow) => ManagedWindowRect,
+    activeWorkspaceIndex: (monitor: string) => number,
+  ) {
+    this.index = index;
+    this.monitor = monitor;
+    this.naturalRootRect = naturalRootRect;
+    this.maximizedRootRect = maximizedRootRect;
+    this.activeWorkspaceIndex = activeWorkspaceIndex;
+  }
+
+  public moveToMonitor(monitor: string, index: number) {
+    this.monitor = monitor;
+    this.index = index;
+    for (const window of this.windows) {
+      this.syncWindowVisibleOutputs(window);
+      if (window.state[WINDOW_STATE_FULLSCREEN]()) {
+        window.state[WINDOW_STATE_RECT].set(this.fullscreenRootRect(window));
+        continue;
+      }
+      if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+        window.state[WINDOW_STATE_RECT].set(this.maximizedRootRect(window));
+        continue;
+      }
+
+      if (!this.isTiled || !this.shouldTile(window)) {
+        const rect = this.clampRectToViewport(
+          window.state[WINDOW_STATE_RECT](),
+        );
+        window.state[WINDOW_STATE_RECT].set(rect);
+        window.state[WINDOW_STATE_FLOATING_RECT].set(
+          this.isTiled ? this.viewportRectToFloatingContentRect(rect) : null,
+        );
+      }
+    }
+  }
+
+  public addWindow(
+    window: WaylandWindow,
+    options: AddWindowOptions = {},
+  ): boolean {
+    if (this.windows.map((window) => window.id).includes(window.id)) {
+      hotReloadDebug("workspace-add-existing-skip", {
+        monitor: this.monitor,
+        index: this.index,
+        windowId: window.id,
+        windowIds: this.windows.map((window) => window.id),
+      });
+      return false;
+    }
+    const previousActiveWindowId = this.activeWindowId;
+    const previousScrollOffset = this.scrollOffset;
+    const restored = this.restoredWindowStateById.get(window.id);
+    const tileInsertionIndex =
+      !restored && this.isTiled && this.shouldTile(window)
+        ? this.tileInsertionIndexAfterFocusedWindow()
+        : null;
+    this.windows.push(window);
+    if (tileInsertionIndex !== null) {
+      this.moveTileWindowToIndex(window, tileInsertionIndex);
+    }
+    const isTileableInCurrentMode = !this.isTiled || this.shouldTile(window);
+    if (!restored && isTileableInCurrentMode) {
+      this.activeWindowId = window.id;
+    }
+    if (restored) {
+      window.cancelAnimation();
+      hotReloadDebug("workspace-add-restored-cancel-animation", {
+        monitor: this.monitor,
+        index: this.index,
+        windowId: window.id,
+        activeWindowId: this.activeWindowId,
+        restoredWindowIds: Array.from(this.restoredWindowStateById.keys()),
+        windowIds: this.windows.map((window) => window.id),
+      });
+      this.restoredWindowStateById.delete(window.id);
+      window.state[WINDOW_STATE_FLOATING_RECT].set(
+        restored.floatingRect ?? null,
+      );
+      window.state[WINDOW_STATE_FLOATING_MAXIMIZED].set(
+        restored.floatingMaximized ?? false,
+      );
+      window.state[WINDOW_STATE_RESTORE_RECT].set(restored.restoreRect ?? null);
+      window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(restored.fullscreenWithChrome ?? false);
+      if (restored.fullscreenWithChrome) {
+        window.state[WINDOW_STATE_FULLSCREEN].set(true);
+        window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(restored.fullscreenRestoreRect ?? null);
+      }
+      window.state[WINDOW_STATE_SNAP_ZONE].set(restored.snapZone ?? null);
+      window.state[WINDOW_STATE_SNAP_MONITOR].set(restored.snapMonitor ?? null);
+      window.state[WINDOW_STATE_MINIMIZED].set(restored.minimized);
+      window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE].set(restored.minimized);
+      window.state[WINDOW_STATE_MAXIMIZED].set(restored.maximized);
+      if (restored.tileWidth !== undefined) {
+        this.tileWidthByWindowId.set(window.id, restored.tileWidth);
+      }
+    }
+    const visible = this.isActive();
+    window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(visible);
+    window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+    window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(visible ? 1 : 0);
+    this.syncWindowVisibleOutputs(window);
+
+    if (!COMPOSITOR.output.list.includes(this.monitor)) {
+      return restored !== undefined;
+    }
+
+    if (restored?.fullscreenWithChrome) {
+      window.state[WINDOW_STATE_RECT].set(this.fullscreenRootRect(window));
+    } else if (restored && !this.isTiled) {
+      window.state[WINDOW_STATE_RECT].set(
+        restored.maximized ? this.maximizedRootRect(window)
+          : this.keepBelowPanel(restored.floatingRect ?? this.centeredFloatingRect(window)),
+      );
+    } else if (this.isTiled && this.shouldTile(window)) {
+      const initialRect = this.centeredFloatingRect(window);
+      window.state[WINDOW_STATE_FLOATING_RECT].set(
+        restored?.floatingRect ?? initialRect,
+      );
+      if (restored?.tileWidth === undefined) {
+        this.setTileWidthFromRect(window, initialRect, true);
+        if (options.restoreScrollIfInitiallyFloating) {
+          this.rememberInitialTileState(
+            window,
+            previousScrollOffset,
+            previousActiveWindowId,
+          );
+        }
+        this.scrollToWindow(window);
+      }
+      this.applyLayout({
+        suppressSSDRebuild: false,
+        animate: restored === undefined,
+        spring: restored === undefined,
+        initialWindowId: window.id,
+        preserveMissingActive: restored !== undefined,
+      });
+    } else if (this.isTiled) {
+      const initialRect = this.centeredFloatingRect(window);
+      const contentRect =
+        restored?.floatingRect ??
+        this.viewportRectToFloatingContentRect(initialRect);
+      window.state[WINDOW_STATE_FLOATING_RECT].set(contentRect);
+      window.state[WINDOW_STATE_RECT].set(
+        this.floatingContentRectToViewportRect(contentRect),
+      );
+    } else {
+      window.state[WINDOW_STATE_RECT].set(this.centeredFloatingRect(window));
+    }
+    hotReloadDebug("workspace-add-window", {
+      monitor: this.monitor,
+      index: this.index,
+      windowId: window.id,
+      restored: restored !== undefined,
+      isTiledWorkspace: this.isTiled,
+      shouldTile: this.shouldTile(window),
+      activeWindowId: this.activeWindowId,
+      windowIds: this.windows.map((window) => window.id),
+      rect: window.state[WINDOW_STATE_RECT](),
+      floatingRect: window.state[WINDOW_STATE_FLOATING_RECT](),
+    });
+    return restored !== undefined;
+  }
+
+  private rememberInitialTileState(
+    window: WaylandWindow,
+    scrollOffset: number,
+    activeWindowId: string | null,
+  ): void {
+    const token = ++this.initialTileStateToken;
+    this.initialTileStateByWindowId.set(window.id, {
+      scrollOffset,
+      activeWindowId,
+      token,
+    });
+    setTimeout(() => {
+      if (this.initialTileStateByWindowId.get(window.id)?.token === token) {
+        this.initialTileStateByWindowId.delete(window.id);
+      }
+    }, INITIAL_TILEABILITY_SETTLE_DURATION);
+  }
+
+  public removeWindow(window: WaylandWindow): WaylandWindow | null | undefined {
+    const index = this.windows.findIndex((current) => current.id === window.id);
+    if (index >= 0) {
+      // Both describe the tile sequence this window is still part of, so they
+      // have to be read before the splice takes it out.
+      const wasTile = this.isTileable(window);
+      const tileIndex = this.tileIndexOf(window.id);
+      this.windows.splice(index, 1);
+      this.tileWidthByWindowId.delete(window.id);
+      this.initialTileStateByWindowId.delete(window.id);
+      this.tileReorderTokenByWindowId.delete(window.id);
+      window.state[WINDOW_STATE_TILE_REORDERING].set(false);
+      if (this.draggingWindowId === window.id) {
+        this.draggingWindowId = null;
+        window.state[WINDOW_STATE_TILE_DRAGGING].set(false);
+      }
+      let nextFocus: WaylandWindow | null = null;
+      if (this.activeWindowId === window.id) {
+        nextFocus = this.successorForRemovedWindow(wasTile, tileIndex);
+        this.activeWindowId = nextFocus?.id ?? null;
+      }
+      return nextFocus;
+    }
+    return undefined;
+  }
+
+  /**
+   * The window that inherits focus when the active one is removed, or null to
+   * leave that to the compositor.
+   *
+   * "The tile that slid into its place" is only an answer for a tile in a
+   * tiled workspace. Anywhere else — a floating workspace, or a dialog that
+   * never held a slot — there is no next-one-along to name, and naming one
+   * anyway is what sent focus to the wrong window: dismissing an SSH approval
+   * prompt jumped to the password manager's main window instead of returning
+   * to the terminal that had asked for it.
+   *
+   * Declining is not caution, it is the better answer. The compositor elects
+   * the window the user most recently typed in or clicked on, which is what
+   * "put me back where I was" means, and is something this layer cannot work
+   * out for itself: it focuses every window at onOpen, so "was focused" cannot
+   * separate a terminal in use from a dialog that appeared beside it.
+   */
+  private successorForRemovedWindow(
+    wasTile: boolean,
+    tileIndex: number,
+  ): WaylandWindow | null {
+    if (!this.isTiled || !wasTile || tileIndex < 0) {
+      return null;
+    }
+    const tileable = this.tileableWindows();
+    return tileable[Math.min(tileIndex, tileable.length - 1)] ?? null;
+  }
+
+  public removeTileDragWindow(window: WaylandWindow) {
+    const index = this.windows.findIndex((current) => current.id === window.id);
+    if (index < 0) {
+      return;
+    }
+    this.windows.splice(index, 1);
+    this.draggingWindowId = null;
+  }
+
+  public removeFloatingWindow(window: WaylandWindow) {
+    const index = this.windows.findIndex((current) => current.id === window.id);
+    if (index < 0) {
+      return;
+    }
+    this.windows.splice(index, 1);
+    if (this.activeWindowId === window.id) {
+      this.activeWindowId =
+        this.activeWindow(this.tileableWindows())?.id ?? null;
+    }
+  }
+
+  public hasWindow(window: WaylandWindow): boolean {
+    return this.windows.some((current) => current.id === window.id);
+  }
+
+  public windowCount(): number {
+    return this.windows.length;
+  }
+
+  /**
+   * Snapshot of every window currently in this workspace. The returned array
+   * is a copy; mutating it is safe and won't affect the workspace state.
+   */
+  public listWindows(): WaylandWindow[] {
+    return this.windows.slice();
+  }
+
+  public findWindowById(windowId: string): WaylandWindow | undefined {
+    return this.windows.find((window) => window.id === windowId);
+  }
+
+  public isActiveWindowId(windowId: string): boolean {
+    return this.activeWindowId === windowId;
+  }
+
+  public moveFocusedTile(direction: -1 | 1): boolean {
+    if (!this.isTiled) {
+      return false;
+    }
+
+    const focused = this.focusedWindow();
+    if (!focused || !this.shouldTile(focused)) {
+      return false;
+    }
+
+    const tileable = this.tileableWindows();
+    const currentIndex = tileable.findIndex(
+      (window) => window.id === focused.id,
+    );
+    if (currentIndex < 0) {
+      return false;
+    }
+
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= tileable.length) {
+      return false;
+    }
+
+    this.stopKineticScroll();
+    this.activeWindowId = focused.id;
+    this.markTileReordering(focused);
+    this.moveTileWindowToIndex(focused, nextIndex);
+    this.scrollToWindow(focused);
+    this.applyLayout({ spring: true });
+    focused.focus();
+    return true;
+  }
+
+  private markTileReordering(window: WaylandWindow): void {
+    const token = ++this.tileReorderToken;
+    this.tileReorderTokenByWindowId.set(window.id, token);
+    window.state[WINDOW_STATE_TILE_REORDERING].set(true);
+    setTimeout(() => {
+      if (this.tileReorderTokenByWindowId.get(window.id) !== token) {
+        return;
+      }
+      this.tileReorderTokenByWindowId.delete(window.id);
+      window.state[WINDOW_STATE_TILE_REORDERING].set(false);
+    }, TILE_SPRING_DURATION);
+  }
+
+  public takeWindowForMove(
+    window: WaylandWindow,
+  ): { window: WaylandWindow; snapshot: WorkspaceWindowSnapshot } | null {
+    if (!this.hasWindow(window)) {
+      return null;
+    }
+
+    const snapshot = this.snapshotWindow(window);
+    this.removeWindow(window);
+    return { window, snapshot };
+  }
+
+  public addMovedWindow(
+    window: WaylandWindow,
+    snapshot: WorkspaceWindowSnapshot,
+  ): boolean {
+    this.restoredWindowStateById.set(window.id, snapshot);
+    return this.addWindow(window);
+  }
+
+  public isRestoringWindow(windowId: string): boolean {
+    return this.restoredWindowStateById.has(windowId);
+  }
+
+  public isActive(): boolean {
+    return this.activeWorkspaceIndex(this.monitor) === this.index;
+  }
+
+  public refreshUsableAreaLayout() {
+    if (!COMPOSITOR.output.list.includes(this.monitor)) {
+      return;
+    }
+
+    if (this.isTiled) {
+      const nextViewportRect = this.tileViewportRect();
+      if (
+        this.lastAppliedTileViewportRect &&
+        managedRectEquals(this.lastAppliedTileViewportRect, nextViewportRect)
+      ) {
+        return;
+      }
+      this.applyLayout({
+        suppressSSDRebuild: false,
+        animate: false,
+        preserveMissingActive: true,
+      });
+      return;
+    }
+
+    for (const window of this.windows) {
+      // Fullscreen owns the whole output even when the client is also maximized.
+      if (window.state[WINDOW_STATE_FULLSCREEN]()) {
+        continue;
+      }
+      const currentRect = window.state[WINDOW_STATE_RECT]();
+      const rect = window.state[WINDOW_STATE_MAXIMIZED]()
+        ? this.maximizedRootRect(window)
+        : this.keepBelowPanel(currentRect);
+      if (managedRectEquals(currentRect, rect)) continue;
+      stopRectAnimation(window, WINDOW_STATE_RECT);
+      window.state[WINDOW_STATE_RECT].set(rect);
+      this.syncFloatingWindowRect(window, rect);
+    }
+  }
+
+  public setVisible(visible: boolean) {
+    this.visibilityAnimationToken += 1;
+    for (const window of this.windows) {
+      this.syncWindowVisibleOutputs(window);
+      cancelWorkspaceVisualAnimation(window);
+      if (window.state[WINDOW_STATE_TILE_DRAGGING]()) {
+        window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+        window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+        window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(1);
+        continue;
+      }
+      window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(visible);
+      window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+      window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(visible ? 1 : 0);
+    }
+  }
+
+  public setWorkspaceGestureVisual(offsetY: number, opacity: number) {
+    this.visibilityAnimationToken += 1;
+    for (const window of this.windows) {
+      this.syncWindowVisibleOutputs(window);
+      cancelWorkspaceVisualAnimation(window);
+      if (window.state[WINDOW_STATE_TILE_DRAGGING]()) {
+        window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+        window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+        window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(1);
+        continue;
+      }
+      // Resistance when swiping beyond the first desktop.
+      window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(offsetY);
+      window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(opacity);
+      window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+    }
+  }
+
+  public animateWorkspaceTransition(options: {
+    fromOffsetY: number;
+    toOffsetY: number;
+    fromOpacity: number;
+    toOpacity: number;
+    visibleAfter: boolean;
+  }) {
+    const token = this.visibilityAnimationToken + 1;
+    this.visibilityAnimationToken = token;
+
+    for (const window of this.windows) {
+      this.syncWindowVisibleOutputs(window);
+      if (window.state[WINDOW_STATE_TILE_DRAGGING]()) {
+        cancelWorkspaceVisualAnimation(window);
+        window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+        window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+        window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(1);
+        continue;
+      }
+      // Minimized windows are hidden purely by `idle` — their composed
+      // opacity stays at the workspace value. Scheduling the visual
+      // animation would both bypass the idle render gate (animating
+      // windows stay renderable while idle) and override the composed
+      // opacity, so the "hidden" window would fade in with the workspace
+      // switch. Keep them on static state only.
+      if (
+        window.state[WINDOW_STATE_MINIMIZED]() ||
+        window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE]()
+      ) {
+        cancelWorkspaceVisualAnimation(window);
+        window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+        window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+        window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(options.toOpacity);
+        continue;
+      }
+      scheduleWorkspaceVisualAnimation(
+        window,
+        options.fromOffsetY,
+        options.toOffsetY,
+        options.fromOpacity,
+        options.toOpacity,
+        WORKSPACE_WAVE_EASING,
+        WORKSPACE_SWITCH_ANIMATION_DURATION,
+      );
+      window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+    }
+
+    setTimeout(
+      () => {
+        if (this.visibilityAnimationToken !== token) {
+          return;
+        }
+        withManagedWindowOnlySSDRebuildSuppressed(() => {
+          this.setVisible(options.visibleAfter);
+        });
+      },
+      WORKSPACE_SWITCH_ANIMATION_DURATION + 34,
+    );
+  }
+
+  public setTiled(tiled: boolean) {
+    if (this.isTiled === tiled) {
+      return;
+    }
+
+    this.stopKineticScroll();
+
+    const focusedWindow = this.focusedWindow();
+    const focusedTileableWindow =
+      focusedWindow &&
+      this.shouldTile(focusedWindow) &&
+      !focusedWindow.state[WINDOW_STATE_MINIMIZED]()
+        ? focusedWindow
+        : undefined;
+    this.isTiled = tiled;
+    if (tiled) {
+      this.scrollOffset = 0;
+      for (const window of this.windows) {
+        this.syncWindowVisibleOutputs(window);
+      }
+      for (const window of this.tileableWindows()) {
+        this.captureFloatingRect(window);
+        if (window.state[WINDOW_STATE_FULLSCREEN]()) continue;
+        const maximized = window.state[WINDOW_STATE_MAXIMIZED]();
+        window.state[WINDOW_STATE_FLOATING_MAXIMIZED].set(maximized);
+        if (maximized) {
+          window.state[WINDOW_STATE_MAXIMIZED].set(false);
+          window.unmaximize();
+        }
+        this.setTileWidthFromRect(
+          window,
+          window.state[WINDOW_STATE_FLOATING_RECT]() ??
+            window.state[WINDOW_STATE_RECT](),
+          true,
+        );
+      }
+      for (const window of this.floatingWindows()) {
+        this.captureFloatingRect(window);
+      }
+      const tileable = this.tileableWindows();
+      const previousActiveWindow = this.activeWindow(tileable);
+      this.activeWindowId =
+        (focusedTileableWindow ?? previousActiveWindow ?? tileable.at(0))?.id ??
+        null;
+      if (focusedTileableWindow) {
+        this.scrollToWindow(focusedTileableWindow);
+      }
+      this.applyLayout({ spring: true, modeTransition: true });
+      focusedTileableWindow?.focus();
+      return;
+    }
+
+    startLayoutMelt(this.monitor);
+    for (const window of this.windows) {
+      if (window.state[WINDOW_STATE_FULLSCREEN]()) {
+        window.state[WINDOW_STATE_RECT].set(this.fullscreenRootRect(window));
+        this.syncWindowVisibleOutputs(window);
+        continue;
+      }
+      if (window.state[WINDOW_STATE_FLOATING_MAXIMIZED]()) {
+        window.state[WINDOW_STATE_FLOATING_MAXIMIZED].set(false);
+        window.state[WINDOW_STATE_MAXIMIZED].set(true);
+        window.maximize();
+      }
+      // A window that is still maximized across the mode switch keeps its
+      // maximized rect. Restoring FLOATING_RECT here would configure the
+      // client to the rect captured at first commit (often degenerate),
+      // collapsing it to its minimum size. (Chrome and friends remember
+      // their previous session state and start maximized, which makes this
+      // easy to hit.)
+      if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          this.maximizedRootRect(window),
+          LAYOUT_TRANSITION_EASING,
+          LAYOUT_TRANSITION_DURATION,
+          {
+            ...MANAGED_WINDOW_ONLY_ANIMATION,
+            squashOnMove: false,
+            layoutMeltOutput: this.monitor,
+          },
+        );
+        window.state[WINDOW_STATE_FLOATING_RECT].set(null);
+        this.syncWindowVisibleOutputs(window);
+        continue;
+      }
+      const rect = window.state[WINDOW_STATE_FLOATING_RECT]();
+      if (rect) {
+        const viewportRect = this.keepBelowPanel(this.shouldTile(window)
+          ? rect
+          : this.floatingContentRectToViewportRect(rect));
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          viewportRect,
+          LAYOUT_TRANSITION_EASING,
+          LAYOUT_TRANSITION_DURATION,
+          {
+            ...MANAGED_WINDOW_ONLY_ANIMATION,
+            squashOnMove: false,
+            layoutMeltOutput: this.monitor,
+          },
+        );
+      }
+      window.state[WINDOW_STATE_FLOATING_RECT].set(null);
+      this.syncWindowVisibleOutputs(window);
+    }
+    if (focusedTileableWindow) {
+      this.activeWindowId = focusedTileableWindow.id;
+      focusedTileableWindow.focus();
+    }
+  }
+
+  public holdTileLayoutForExit(window: WaylandWindow): void {
+    if (!this.isTiled || !this.hasWindow(window) || !this.isTileable(window)) return;
+    const closed = windowWaveClosedProgress(window);
+    if (closed.peek() >= 1) return;
+    this.releaseExitLayoutHold(window.id);
+    this.exitLayoutHolds.set(window.id, closed.subscribe(() => {
+      if (closed.peek() >= 1 && this.releaseExitLayoutHold(window.id)) {
+        this.applyLayout({ spring: true });
+      }
+    }));
+  }
+
+  public releaseExitLayoutHold(windowId: string): boolean {
+    const unsubscribe = this.exitLayoutHolds.get(windowId);
+    if (!unsubscribe) return false;
+    unsubscribe();
+    this.exitLayoutHolds.delete(windowId);
+    return true;
+  }
+
+  public clearExitLayoutHolds(): void {
+    for (const unsubscribe of this.exitLayoutHolds.values()) unsubscribe();
+    this.exitLayoutHolds.clear();
+  }
+
+  public applyLayout(options: LayoutOptions = {}) {
+    // Focus and other layout requests must also wait for all outgoing shaders.
+    if (!this.isTiled || this.exitLayoutHolds.size > 0) {
+      return;
+    }
+
+    const tileable = this.tileableWindows();
+    const animate = options.animate ?? true;
+    const suppressSSDRebuild = options.suppressSSDRebuild ?? true;
+    const canSuppress = this.canSuppressLayoutSSDRebuild(tileable);
+    const animationOptions =
+      animate && suppressSSDRebuild && canSuppress
+        ? MANAGED_WINDOW_ONLY_ANIMATION
+        : undefined;
+    this.clampScrollOffset(tileable.length);
+
+    if (tileable.length === 0) {
+      this.activeWindowId = null;
+      hotReloadDebug("workspace-apply-layout-empty", {
+        monitor: this.monitor,
+        index: this.index,
+        animate,
+        suppressSSDRebuild,
+        canSuppress,
+        floatingWindowIds: this.floatingWindows().map((window) => window.id),
+      });
+      this.applyFloatingLayout(
+        animationOptions,
+        animate,
+        options.immediateFloatingWindowIds,
+      );
+      return;
+    }
+
+    if (
+      !this.activeWindowId ||
+      !tileable.some((window) => window.id === this.activeWindowId)
+    ) {
+      if (!options.preserveMissingActive) {
+        this.activeWindowId = tileable.at(-1)?.id ?? null;
+      }
+    }
+
+    if (options.modeTransition) startLayoutMelt(this.monitor);
+    const viewportRect = this.tileViewportRect();
+    this.lastAppliedTileViewportRect = snapshotManagedRect(viewportRect);
+    const appliedRects: Record<string, ManagedWindowRect> = {};
+    this.lastDraggingSlotRect = null;
+
+    tileable.forEach((window, index) => {
+      const rect = window.state[WINDOW_STATE_FULLSCREEN]()
+        ? this.fullscreenRootRect(window)
+        : window.state[WINDOW_STATE_MAXIMIZED]()
+          ? this.maximizedRootRect(window)
+          : this.gridTileRect(index, tileable.length);
+      appliedRects[window.id] = rect;
+      if (window.id === this.draggingWindowId) {
+        this.lastDraggingSlotRect = rect;
+      }
+      if (window.id !== this.draggingWindowId) {
+        // The new portal opens at its final cell while existing tiles make room.
+        if (animate && window.id !== options.initialWindowId) {
+          playRectAnimation(
+            window,
+            WINDOW_STATE_RECT,
+            rect,
+            options.modeTransition
+              ? LAYOUT_TRANSITION_EASING
+              : options.spring ? TILE_SPRING_EASING : WINDOW_MANAGEMENT_EASING,
+            options.modeTransition ? LAYOUT_TRANSITION_DURATION
+              : options.spring ? TILE_SPRING_DURATION : TILE_ANIMATION_DURATION,
+            {
+              ...animationOptions,
+              squashOnMove: Boolean(options.spring) && !options.modeTransition,
+              layoutMeltOutput: options.modeTransition ? this.monitor : undefined,
+            },
+          );
+        } else {
+          if (options.cancelRectAnimations !== false) {
+            stopRectAnimation(window, WINDOW_STATE_RECT);
+          }
+          window.state[WINDOW_STATE_RECT].set(rect);
+        }
+      }
+    });
+
+    hotReloadDebug("workspace-apply-layout", {
+      monitor: this.monitor,
+      index: this.index,
+      animate,
+      suppressSSDRebuild,
+      canSuppress,
+      activeWindowId: this.activeWindowId,
+      scrollOffset: this.scrollOffset,
+      tileableWindowIds: tileable.map((window) => window.id),
+      floatingWindowIds: this.floatingWindows().map((window) => window.id),
+      appliedRects,
+    });
+    this.applyFloatingLayout(
+      animationOptions,
+      animate,
+      options.immediateFloatingWindowIds,
+    );
+  }
+
+  public resizeTile(event: WindowResizeEvent) {
+    const tileable = this.tileableWindows();
+    if (!tileable.some((window) => window.id === event.window.id)) {
+      return;
+    }
+
+    if (
+      (event.phase === "start" || event.phase === "update") &&
+      event.window.state[WINDOW_STATE_MAXIMIZED]()
+    ) {
+      event.window.state[WINDOW_STATE_MAXIMIZED].set(false);
+      event.window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+      event.window.unmaximize();
+    }
+
+    stopRectAnimation(event.window, WINDOW_STATE_RECT);
+    this.activeWindowId = event.window.id;
+
+    // Equal grid cells own their size; free resizing belongs to floating mode.
+    this.applyLayout();
+  }
+
+  /** Layout slot reserved for the tile being dragged, or null when not dragging. */
+  public draggingSlotRect(): ManagedWindowRect | null {
+    return this.draggingWindowId ? this.lastDraggingSlotRect : null;
+  }
+
+  public beginTileDrag(window: WaylandWindow, rect: ManagedWindowRect) {
+    if (!this.shouldTile(window)) {
+      return;
+    }
+    this.activeWindowId = window.id;
+    this.draggingWindowId = window.id;
+    const wasMaximized = window.state[WINDOW_STATE_MAXIMIZED]();
+    window.state[WINDOW_STATE_MAXIMIZED].set(false);
+    window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+    if (wasMaximized) {
+      window.unmaximize();
+    }
+    window.state[WINDOW_STATE_TILE_DRAGGING].set(true);
+    this.syncWindowVisibleOutputs(window);
+    window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+    window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+    window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(1);
+    this.setTileWidthFromRect(window, window.state[WINDOW_STATE_RECT](), false);
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(rect);
+    this.applyLayout();
+  }
+
+  public adoptTileDragWindow(window: WaylandWindow, rect: ManagedWindowRect) {
+    if (!this.hasWindow(window)) {
+      this.windows.push(window);
+    }
+    const visible = this.isActive();
+    this.activeWindowId = window.id;
+    this.draggingWindowId = window.id;
+    this.setTileWidthFromRect(window, rect, false);
+    window.state[WINDOW_STATE_TILE_DRAGGING].set(true);
+    this.syncWindowVisibleOutputs(window);
+    window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(true);
+    window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+    window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(visible ? 1 : 0);
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(rect);
+  }
+
+  public adoptFloatingWindow(window: WaylandWindow, rect: ManagedWindowRect) {
+    if (!this.hasWindow(window)) {
+      this.windows.push(window);
+    }
+    const visible = this.isActive();
+    this.activeWindowId = window.id;
+    this.syncWindowVisibleOutputs(window);
+    resetWorkspaceVisualState(window, visible);
+    window.state[WINDOW_STATE_FLOATING_RECT].set(
+      this.isTiled ? this.viewportRectToFloatingContentRect(rect) : rect,
+    );
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(rect);
+  }
+
+  public updateTileDrag(
+    window: WaylandWindow,
+    rect: ManagedWindowRect,
+    pointerX: number,
+    pointerY: number,
+  ) {
+    if (this.draggingWindowId !== window.id) {
+      this.beginTileDrag(window, rect);
+    }
+    this.activeWindowId = window.id;
+    this.moveTileWindowToIndex(
+      window,
+      this.tileInsertionIndexForPointer(window, pointerX, pointerY),
+    );
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(rect);
+    this.scrollToWindow(window);
+    this.applyLayout({ spring: true });
+  }
+
+  public endTileDrag(window: WaylandWindow, cancelled: boolean) {
+    if (this.draggingWindowId !== window.id) {
+      return;
+    }
+    this.draggingWindowId = null;
+    window.state[WINDOW_STATE_TILE_DRAGGING].set(false);
+    this.syncWindowVisibleOutputs(window);
+    window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+    window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(this.isActive() ? 1 : 0);
+    if (!cancelled) {
+      this.activeWindowId = window.id;
+      this.scrollToWindow(window);
+    }
+    this.applyLayout({ spring: true });
+    if (!cancelled && this.isActive()) {
+      window.focus();
+    }
+  }
+
+  public focusWindow(window: WaylandWindow) {
+    if (!this.shouldTile(window)) {
+      return;
+    }
+    if (this.activeWindowId === window.id) {
+      return;
+    }
+    this.activeWindowId = window.id;
+    this.scrollToWindow(window);
+    this.applyLayout();
+  }
+
+  /** Present the target and refresh its grid/maximized geometry. */
+  public panToWindow(window: WaylandWindow) {
+    if (!this.isTiled) {
+      return;
+    }
+    if (!this.shouldTile(window)) {
+      return;
+    }
+    this.activeWindowId = window.id;
+    this.scrollToWindow(window, { force: true });
+    this.applyLayout();
+  }
+
+  public focusWindowUnderPointer(
+    window: WaylandWindow,
+  ): WaylandWindow | undefined {
+    if (
+      !this.hasWindow(window) ||
+      window.state[WINDOW_STATE_MINIMIZED]()
+    ) {
+      return undefined;
+    }
+
+    const focused = this.focusedWindow();
+    if (
+      focused &&
+      focused.id !== window.id &&
+      this.areTransientRelatives(focused, window)
+    ) {
+      return undefined;
+    }
+
+    if (read(window.isFocused)) {
+      return undefined;
+    }
+
+    if (this.shouldTile(window)) {
+      const previousActiveWindowId = this.activeWindowId;
+      this.activeWindowId = window.id;
+      if (previousActiveWindowId !== window.id) {
+        this.reapplyStaticManagedLayout();
+      }
+    }
+    window.focus();
+    return window;
+  }
+
+  private areTransientRelatives(a: WaylandWindow, b: WaylandWindow): boolean {
+    return (
+      this.isTransientChildOf(a, b) ||
+      this.isTransientChildOf(b, a) ||
+      this.hasUnparentedTransientAffinity(a, b)
+    );
+  }
+
+  private isTransientChildOf(
+    child: WaylandWindow,
+    parent: WaylandWindow,
+  ): boolean {
+    return child.isTransient() && child.parentId() === parent.id;
+  }
+
+  private hasUnparentedTransientAffinity(
+    a: WaylandWindow,
+    b: WaylandWindow,
+  ): boolean {
+    const transient = !this.shouldTile(a) && a.isTransient() ? a : null;
+    const other =
+      transient === a ? b : !this.shouldTile(b) && b.isTransient() ? b : null;
+    if (!transient || !other || transient.parentId()) {
+      return false;
+    }
+
+    const transientAppId = transient.appId();
+    return transientAppId !== undefined && transientAppId === other.appId();
+  }
+
+  private reapplyStaticManagedLayout(): void {
+    if (!this.isTiled) {
+      return;
+    }
+
+    const tileable = this.tileableWindows();
+    if (tileable.length === 0) {
+      return;
+    }
+
+    withManagedWindowOnlySSDRebuildSuppressed(
+      () => {
+        this.applyLayout({
+          animate: false,
+          preserveMissingActive: true,
+          cancelRectAnimations: false,
+        });
+      },
+      { strict: true },
+    );
+    for (const window of tileable) {
+      markManagedWindowDirty(window.id);
+    }
+  }
+
+  public scrollBy(
+    deltaX: number,
+    options: {
+      stopKinetic?: boolean;
+      suppressSSDRebuild?: boolean;
+      cancelRectAnimations?: boolean;
+    } = {},
+  ): boolean {
+    if (!this.isTiled || deltaX === 0) {
+      return false;
+    }
+    if (options.stopKinetic !== false) {
+      this.stopKineticScroll();
+    }
+
+    const before = this.scrollOffset;
+    this.scrollOffset += deltaX;
+    const tileable = this.tileableWindows();
+    this.clampScrollOffset(tileable.length);
+    if (this.scrollOffset === before) {
+      return false;
+    }
+
+    const cancelRectAnimations = options.cancelRectAnimations ?? true;
+    const apply = () =>
+      this.applyLayout({
+        animate: false,
+        preserveMissingActive: true,
+        cancelRectAnimations,
+      });
+    if (options.suppressSSDRebuild === false) {
+      apply();
+    } else {
+      withManagedWindowOnlySSDRebuildSuppressed(apply, { strict: true });
+    }
+    for (const window of tileable) {
+      markManagedWindowDirty(window.id);
+    }
+    return true;
+  }
+
+  /**
+   * Scroll offsets where the workspace scroll should catch: for every
+   * non-maximized tile the two boundaries of full visibility — tile left
+   * edge at the viewport left (TILE_MARGIN gap from the screen edge) and
+   * tile right edge at the viewport right — and for maximized tiles the
+   * single centered offset. Offsets at or outside the scroll range are
+   * dropped; the clamped ends are natural stops already.
+   */
+  private tileSnapOffsets(): number[] {
+    const tileable = this.tileableWindows();
+    const viewportRect = this.tileViewportRect();
+    const viewportWidth = read(viewportRect.width);
+    const contentWidth = this.tileContentWidth(tileable, viewportRect);
+    const maxScrollOffset = Math.max(0, contentWidth - viewportWidth);
+    const offsets: number[] = [];
+    let left = 0;
+    for (const window of tileable) {
+      const width = this.tileWidthForWindow(window, viewportRect);
+      if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+        offsets.push(left + width / 2 - viewportWidth / 2);
+      } else {
+        offsets.push(left);
+        offsets.push(left + width - viewportWidth);
+      }
+      left += width + TILE_GAP;
+    }
+    const inRange = offsets
+      .filter((offset) => offset > 0.5 && offset < maxScrollOffset - 0.5)
+      .sort((a, b) => a - b);
+    const deduped: number[] = [];
+    for (const offset of inRange) {
+      if (deduped.length === 0 || offset - deduped[deduped.length - 1] > 1) {
+        deduped.push(offset);
+      }
+    }
+    return deduped;
+  }
+
+  /**
+   * First snap offset a scroll from `from` to `to` would cross, or null.
+   * `from` itself is excluded so a scroll resting on a snap position can
+   * move off it.
+   */
+  public snapOffsetBetween(from: number, to: number): number | null {
+    if (to === from) {
+      return null;
+    }
+    const forward = to > from;
+    let best: number | null = null;
+    for (const offset of this.tileSnapOffsets()) {
+      const crossed = forward
+        ? offset > from + 0.5 && offset <= to
+        : offset < from - 0.5 && offset >= to;
+      if (!crossed) {
+        continue;
+      }
+      if (best === null || (forward ? offset < best : offset > best)) {
+        best = offset;
+      }
+    }
+    return best;
+  }
+
+  public get scrollPosition(): number {
+    return this.scrollOffset;
+  }
+
+  /**
+   * Scroll offset the kinetic glide should settle on, or null (only when the
+   * workspace has no tiles).
+   *
+   * Evaluated at the moment the glide decays below the snap threshold, from
+   * the CURRENT scroll position — the state the user is looking at when the
+   * settle visibly begins:
+   *
+   * 1. The anchor is the tile whose center is closest to the screen center.
+   * 2. A non-maximized anchor snaps flush to the screen edge on the side it
+   *    leans toward (the TILE_MARGIN gap comes from the viewport inset).
+   * 3. A maximized anchor snaps to its centered position.
+   *
+   * Both the selection and the destination are unambiguous, so no rejection
+   * or compatibility pass is needed.
+   */
+  private kineticSnapTarget(): number | null {
+    const viewportRect = this.tileViewportRect();
+    const viewportWidth = read(viewportRect.width);
+    const tileable = this.tileableWindows();
+    const contentWidth = this.tileContentWidth(tileable, viewportRect);
+    const maxScrollOffset = Math.max(0, contentWidth - viewportWidth);
+    const from = clamp(this.scrollOffset, 0, maxScrollOffset);
+    const viewportCenter = from + viewportWidth / 2;
+
+    let best: { distance: number; target: number } | null = null;
+    let left = 0;
+    for (const window of tileable) {
+      const width = this.tileWidthForWindow(window, viewportRect);
+      const center = left + width / 2;
+      const distance = Math.abs(center - viewportCenter);
+      const target = window.state[WINDOW_STATE_MAXIMIZED]()
+        ? center - viewportWidth / 2
+        : center < viewportCenter
+          ? left
+          : left + width - viewportWidth;
+      if (best === null || distance < best.distance) {
+        best = { distance, target };
+      }
+      left += width + TILE_GAP;
+    }
+    return best === null ? null : clamp(best.target, 0, maxScrollOffset);
+  }
+
+  public startKineticScroll(
+    initialVelocityX: number,
+    onFrame?: () => void,
+    snapMaxVelocity = 0,
+  ): void {
+    this.stopKineticScroll();
+    if (
+      !this.isTiled ||
+      Math.abs(initialVelocityX) < WORKSPACE_KINETIC_SCROLL_MIN_VELOCITY
+    ) {
+      return;
+    }
+
+    let velocityX = clamp(
+      initialVelocityX,
+      -WORKSPACE_KINETIC_SCROLL_MAX_VELOCITY,
+      WORKSPACE_KINETIC_SCROLL_MAX_VELOCITY,
+    );
+    let lastTime: number | null = null;
+    const token = this.kineticScrollToken + 1;
+    this.kineticScrollToken = token;
+    const intervalMs = this.kineticScrollIntervalMs();
+    let firstStep = true;
+
+    const step = (dtMs: number): boolean => {
+      // The moment the glide decays to snapping speed, pick the settle
+      // anchor and glide onto it with the standard tile animation — the same
+      // easing every other window movement uses.
+      if (snapMaxVelocity > 0 && Math.abs(velocityX) <= snapMaxVelocity) {
+        const target = this.kineticSnapTarget();
+        if (target !== null) {
+          this.stopKineticScroll();
+          if (Math.abs(target - this.scrollOffset) > 0.5) {
+            this.scrollOffset = target;
+            this.applyLayout({ preserveMissingActive: true });
+            onFrame?.();
+          }
+          return false;
+        }
+      }
+
+      const deltaX = (velocityX * dtMs) / 1000;
+      const scrolled = this.scrollBy(deltaX, {
+        stopKinetic: false,
+        cancelRectAnimations: firstStep,
+      });
+      firstStep = false;
+      if (!scrolled) {
+        this.stopKineticScroll();
+        return false;
+      }
+
+      onFrame?.();
+
+      velocityX *= Math.exp(-dtMs / WORKSPACE_KINETIC_SCROLL_TIME_CONSTANT_MS);
+      if (Math.abs(velocityX) < WORKSPACE_KINETIC_SCROLL_STOP_VELOCITY) {
+        this.stopKineticScroll();
+        return false;
+      }
+
+      return true;
+    };
+
+    if (!step(intervalMs)) {
+      return;
+    }
+
+    this.kineticScrollPoll = createManagedPoll(
+      intervalMs,
+      (handle) => {
+        if (this.kineticScrollToken !== token || !this.isTiled) {
+          handle.cancel();
+          if (this.kineticScrollPoll === handle) {
+            this.kineticScrollPoll = null;
+          }
+          return;
+        }
+
+        const now = handle.nowMs;
+        const dtMs = Math.max(
+          1,
+          lastTime === null ? intervalMs : now - lastTime,
+        );
+        lastTime = now;
+        step(dtMs);
+      },
+      "none",
+    );
+  }
+
+  public stopKineticScroll(): void {
+    this.kineticScrollToken += 1;
+    if (this.kineticScrollPoll) {
+      this.kineticScrollPoll.cancel();
+      this.kineticScrollPoll = null;
+    }
+  }
+
+  private kineticScrollIntervalMs(): number {
+    const refreshRate =
+      COMPOSITOR.output.current[this.monitor]?.resolution?.refreshRate ??
+      WORKSPACE_KINETIC_SCROLL_FALLBACK_REFRESH_RATE;
+    return 1000 / Math.max(1, refreshRate);
+  }
+
+  public focusRelative(direction: -1 | 1) {
+    const tileable = this.tileableWindows();
+    if (tileable.length === 0) {
+      return;
+    }
+    const activeIndex = tileable.findIndex(
+      (window) => window.id === this.activeWindowId,
+    );
+    const fallbackIndex = this.focusFallbackTileIndex(tileable, direction);
+    const currentIndex =
+      activeIndex >= 0
+        ? activeIndex
+        : (fallbackIndex ?? (direction < 0 ? tileable.length : -1));
+    const nextIndex = clamp(currentIndex + direction, 0, tileable.length - 1);
+    this.activeWindowId = tileable[nextIndex].id;
+    this.scrollToWindow(tileable[nextIndex]);
+    this.applyLayout();
+    this.focusActiveWindow();
+  }
+
+  private focusFallbackTileIndex(
+    tileable: WaylandWindow[],
+    direction: -1 | 1,
+  ): number | undefined {
+    const focused = this.focusedWindow();
+    if (!focused || this.shouldTile(focused)) {
+      return undefined;
+    }
+
+    const focusedCenter = rectCenterX(focused.state[WINDOW_STATE_RECT]());
+    const candidates = tileable
+      .map((window, index) => ({
+        index,
+        center: rectCenterX(window.state[WINDOW_STATE_RECT]()),
+      }))
+      .filter(({ center }) =>
+        direction < 0 ? center < focusedCenter : center > focusedCenter,
+      );
+    if (candidates.length === 0) {
+      return undefined;
+    }
+
+    candidates.sort((a, b) =>
+      direction < 0 ? b.center - a.center : a.center - b.center,
+    );
+    return candidates[0].index - direction;
+  }
+
+  public focusActiveWindow() {
+    const active = this.windows.find(
+      (window) => window.id === this.activeWindowId,
+    );
+    active?.focus();
+  }
+
+  public shouldTile(window: WaylandWindow): boolean {
+    return canTileWindow(window);
+  }
+
+  public reclassifyWindow(window: WaylandWindow, wasTileable: boolean) {
+    if (!this.isTiled || !this.hasWindow(window)) {
+      this.syncWindowVisibleOutputs(window);
+      return;
+    }
+
+    const isTileable = this.shouldTile(window);
+    if (wasTileable === isTileable) {
+      return;
+    }
+
+    this.stopKineticScroll();
+    let restoredInitialActiveWindowId: string | null | undefined;
+    if (!isTileable) {
+      const initialTileState = this.initialTileStateByWindowId.get(window.id);
+      this.initialTileStateByWindowId.delete(window.id);
+      if (initialTileState) {
+        this.scrollOffset = initialTileState.scrollOffset;
+        restoredInitialActiveWindowId = initialTileState.activeWindowId;
+      }
+      this.tileWidthByWindowId.delete(window.id);
+      stopRectAnimation(window, WINDOW_STATE_RECT);
+      // Removing this tile can clamp scrollOffset. Defer the floating content
+      // coordinate until applyLayout has established that final offset.
+      window.state[WINDOW_STATE_FLOATING_RECT].set(null);
+
+      if (this.activeWindowId === window.id) {
+        // The slot this window has just vacated by ceasing to be tileable.
+        const windowIndex = this.tileIndexOf(window.id);
+        const tileable = this.tileableWindows();
+        this.activeWindowId =
+          (restoredInitialActiveWindowId &&
+          tileable.some(
+            (current) => current.id === restoredInitialActiveWindowId,
+          )
+            ? restoredInitialActiveWindowId
+            : tileable[Math.min(windowIndex, tileable.length - 1)]?.id) ?? null;
+      }
+    } else {
+      const contentRect = window.state[WINDOW_STATE_FLOATING_RECT]();
+      const viewportRect = contentRect
+        ? this.floatingContentRectToViewportRect(contentRect)
+        : window.state[WINDOW_STATE_RECT]();
+      window.state[WINDOW_STATE_FLOATING_RECT].set(viewportRect);
+      this.setTileWidthFromRect(window, viewportRect, true);
+      if (read(window.isFocused) || !this.activeWindowId) {
+        this.activeWindowId = window.id;
+        this.scrollToWindow(window);
+      }
+    }
+
+    this.syncWindowVisibleOutputs(window);
+    this.applyLayout({
+      suppressSSDRebuild: false,
+      preserveMissingActive: true,
+      immediateFloatingWindowIds: !isTileable
+        ? new Set([window.id])
+        : undefined,
+    });
+  }
+
+  public snapshot(): WorkspaceSnapshot {
+    return {
+      monitor: this.monitor,
+      index: this.index,
+      isTiled: this.isTiled,
+      layout: "grid",
+      activeWindowId: this.activeWindowId,
+      scrollOffset: this.scrollOffset,
+      windows: this.windows.map((window) => this.snapshotWindow(window)),
+    };
+  }
+
+  public restore(snapshot: WorkspaceSnapshot) {
+    // Retire the old scrolling layout once; subsequent reloads keep the mode.
+    this.isTiled = snapshot.layout === "grid" && snapshot.isTiled;
+    this.activeWindowId = snapshot.activeWindowId;
+    this.scrollOffset = 0;
+    this.tileWidthByWindowId.clear();
+    this.restoredWindowStateById.clear();
+    for (const window of snapshot.windows) {
+      if (window.tileWidth !== undefined) {
+        this.tileWidthByWindowId.set(window.id, window.tileWidth);
+      }
+      this.restoredWindowStateById.set(window.id, window);
+    }
+    hotReloadDebug("workspace-restore", {
+      monitor: this.monitor,
+      index: this.index,
+      isTiled: this.isTiled,
+      activeWindowId: this.activeWindowId,
+      scrollOffset: this.scrollOffset,
+      restoredWindowIds: Array.from(this.restoredWindowStateById.keys()),
+    });
+  }
+
+  public getWindows(): WaylandWindow[] {
+    return Array.from(this.windows);
+  }
+
+  private snapshotWindow(window: WaylandWindow): WorkspaceWindowSnapshot {
+    const fullscreenRestoreRect = window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
+    return {
+      id: window.id,
+      tileWidth: this.tileWidthByWindowId.get(window.id),
+      floatingRect: this.isTiled
+        ? window.state[WINDOW_STATE_FLOATING_RECT]()
+        : snapshotManagedRect(window.state[WINDOW_STATE_RECT]()),
+      floatingMaximized: window.state[WINDOW_STATE_FLOATING_MAXIMIZED](),
+      restoreRect: window.state[WINDOW_STATE_RESTORE_RECT](),
+      fullscreenWithChrome: window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME](),
+      fullscreenRestoreRect: fullscreenRestoreRect ? snapshotManagedRect(fullscreenRestoreRect) : null,
+      snapZone: window.state[WINDOW_STATE_SNAP_ZONE](),
+      snapMonitor: window.state[WINDOW_STATE_SNAP_MONITOR](),
+      minimized: window.state[WINDOW_STATE_MINIMIZED](),
+      maximized: window.state[WINDOW_STATE_MAXIMIZED](),
+    };
+  }
+
+  private syncWindowVisibleOutputs(window: WaylandWindow) {
+    window.state[WINDOW_STATE_WORKSPACE_TILED].set(this.isTiled);
+    window.state[WINDOW_STATE_TILED].set(
+      this.isTiled && this.shouldTile(window),
+    );
+    window.state[WINDOW_STATE_VISIBLE_OUTPUTS].set(
+      this.isTiled ? [this.monitor] : null,
+    );
+  }
+
+  private canSuppressLayoutSSDRebuild(_tileable: WaylandWindow[]): boolean {
+    // Opening windows may still be building decoration structure, labels,
+    // icons, and shader inputs. SSD rebuild suppression is global, so using
+    // it for existing windows' layout animation would also hide those
+    // initial decoration updates until an unrelated interaction occurs.
+    return true;
+  }
+
+  /**
+   * Whether `window` occupies a slot in the tile sequence right now.
+   * Minimized windows are excluded because they hold no slot, so they must
+   * not be counted when translating a position into that sequence.
+   */
+  private isTileable(window: WaylandWindow): boolean {
+    return this.shouldTile(window) && !window.state[WINDOW_STATE_MINIMIZED]();
+  }
+
+  private tileableWindows(): WaylandWindow[] {
+    return this.windows.filter((window) => this.isTileable(window));
+  }
+
+  /**
+   * Where `windowId` sits in the tile sequence: its index in
+   * `tileableWindows()`, or the index it would occupy if it were a tile. -1
+   * when the window is not in this workspace at all.
+   *
+   * Both callers want that second reading — one asks about a window it has
+   * just removed, the other about one that has just stopped being tileable —
+   * and both used to index `tileableWindows()` with a raw `this.windows`
+   * position instead. That array also holds dialogs, transients and minimized
+   * windows, so the position ran past the end of the tile list and the clamp
+   * below it silently returned the *last* tile: whichever window happened to
+   * be opened most recently.
+   */
+  private tileIndexOf(windowId: string): number {
+    const position = this.windows.findIndex(
+      (current) => current.id === windowId,
+    );
+    if (position < 0) {
+      return -1;
+    }
+    return this.windows
+      .slice(0, position)
+      .filter((current) => this.isTileable(current)).length;
+  }
+
+  public focusedWindow(): WaylandWindow | undefined {
+    return this.windows.find((window) => read(window.isFocused));
+  }
+
+  public syncFloatingWindowRect(
+    window: WaylandWindow,
+    viewportRect: ManagedWindowRect,
+  ) {
+    if (!this.isTiled) {
+      window.state[WINDOW_STATE_FLOATING_RECT].set(viewportRect);
+      return;
+    }
+    if (this.shouldTile(window)) {
+      return;
+    }
+    window.state[WINDOW_STATE_FLOATING_RECT].set(
+      this.viewportRectToFloatingContentRect(viewportRect),
+    );
+  }
+
+  private activeWindow(windows = this.windows): WaylandWindow | undefined {
+    return windows.find((window) => window.id === this.activeWindowId);
+  }
+
+  private tileInsertionIndexForPointer(
+    window: WaylandWindow,
+    pointerX: number,
+    pointerY: number,
+  ): number {
+    const tileable = this.tileableWindows();
+    let nearest = Math.max(0, tileable.indexOf(window));
+    let distance = Infinity;
+    for (let index = 0; index < tileable.length; index++) {
+      const rect = this.gridTileRect(index, tileable.length);
+      const candidate = Math.hypot(
+        pointerX - read(rect.x) - read(rect.width) / 2,
+        pointerY - read(rect.y) - read(rect.height) / 2,
+      );
+      if (candidate < distance) {
+        distance = candidate;
+        nearest = index;
+      }
+    }
+    return nearest;
+  }
+
+  private gridTileRect(index: number, count: number): ManagedWindowRect {
+    const viewport = this.tileViewportRect();
+    const columns = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / columns);
+    const row = Math.floor(index / columns);
+    const rowColumns = Math.min(columns, count - row * columns);
+    const width = (read(viewport.width) - TILE_GAP * (rowColumns - 1)) / rowColumns;
+    const height = (read(viewport.height) - TILE_GAP * (rows - 1)) / rows;
+    return {
+      x: read(viewport.x) + (index % columns) * (width + TILE_GAP),
+      y: read(viewport.y) + row * (height + TILE_GAP),
+      width,
+      height,
+    };
+  }
+
+  private tileInsertionIndexAfterFocusedWindow(): number {
+    const tileable = this.tileableWindows();
+    const focused = this.focusedWindow();
+    const anchor =
+      focused && this.shouldTile(focused)
+        ? focused
+        : this.activeWindow(tileable);
+    if (!anchor) {
+      return tileable.length;
+    }
+
+    const anchorIndex = tileable.findIndex(
+      (window) => window.id === anchor.id,
+    );
+    return anchorIndex >= 0 ? anchorIndex + 1 : tileable.length;
+  }
+
+  private moveTileWindowToIndex(window: WaylandWindow, tileIndex: number) {
+    const currentIndex = this.windows.findIndex(
+      (current) => current.id === window.id,
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+
+    this.windows.splice(currentIndex, 1);
+    const tileableWithoutWindow = this.tileableWindows();
+    const beforeWindow = tileableWithoutWindow[tileIndex];
+
+    if (beforeWindow) {
+      const insertIndex = this.windows.findIndex(
+        (current) => current.id === beforeWindow.id,
+      );
+      this.windows.splice(Math.max(0, insertIndex), 0, window);
+      return;
+    }
+
+    let lastTileableIndex = -1;
+    for (let index = 0; index < this.windows.length; index++) {
+      if (this.shouldTile(this.windows[index])) {
+        lastTileableIndex = index;
+      }
+    }
+    this.windows.splice(lastTileableIndex + 1, 0, window);
+  }
+
+  private captureFloatingRect(window: WaylandWindow) {
+    if (!window.state[WINDOW_STATE_FLOATING_RECT]()) {
+      const rect = this.isTiled
+        ? this.viewportRectToFloatingContentRect(
+            window.state[WINDOW_STATE_RECT](),
+          )
+        : window.state[WINDOW_STATE_RECT]();
+      window.state[WINDOW_STATE_FLOATING_RECT].set(rect);
+    }
+  }
+
+  public floatingWindows(): WaylandWindow[] {
+    return this.windows.filter(
+      (window) =>
+        !this.shouldTile(window) && !window.state[WINDOW_STATE_MINIMIZED](),
+    );
+  }
+
+  private applyFloatingLayout(
+    animationOptions: LayoutOptions | undefined,
+    animate = true,
+    immediateWindowIds?: ReadonlySet<string>,
+  ) {
+    for (const window of this.floatingWindows()) {
+      // A maximized window's rect is owned by the maximize flow. Rolling it
+      // back to FLOATING_RECT here could hit a degenerate rect (same reason
+      // as in setTiled(false)).
+      if (window.state[WINDOW_STATE_MAXIMIZED]() || window.state[WINDOW_STATE_FULLSCREEN]()) {
+        continue;
+      }
+      const contentRect =
+        window.state[WINDOW_STATE_FLOATING_RECT]() ??
+        this.viewportRectToFloatingContentRect(
+          this.centeredFloatingRect(window),
+        );
+      window.state[WINDOW_STATE_FLOATING_RECT].set(contentRect);
+      const rect = this.keepBelowPanel(this.floatingContentRectToViewportRect(contentRect));
+      this.syncFloatingWindowRect(window, rect);
+      if (animate && !immediateWindowIds?.has(window.id)) {
+        playRectAnimation(
+          window,
+          WINDOW_STATE_RECT,
+          rect,
+          WINDOW_MANAGEMENT_EASING,
+          TILE_ANIMATION_DURATION,
+          animationOptions,
+        );
+      } else {
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(rect);
+      }
+      hotReloadDebug("workspace-apply-floating-layout", {
+        monitor: this.monitor,
+        index: this.index,
+        animate,
+        windowId: window.id,
+        rect,
+        contentRect,
+      });
+    }
+  }
+
+  private centeredFloatingRect(window: WaylandWindow): ManagedWindowRect {
+    const sizeRect = this.naturalRootRect(window);
+    const monitor = COMPOSITOR.output.current[this.monitor];
+    if (!monitor?.resolution) {
+      return sizeRect;
+    }
+
+    const usableRect = COMPOSITOR.layer.usableArea(this.monitor);
+    const logicalWidth =
+      usableRect?.width ?? monitor.resolution.width / monitor.scale;
+    const logicalHeight =
+      usableRect?.height ?? monitor.resolution.height / monitor.scale;
+    const logicalX = usableRect?.x ?? monitor.position.x;
+    const logicalY = usableRect?.y ?? monitor.position.y;
+
+    let width = read(sizeRect.width);
+    let height = read(sizeRect.height);
+    // Reading the natural size while the client geometry is still unsettled
+    // (≈0, e.g. right after the first commit) yields a degenerate rect that
+    // is nothing but the SSD frame. Freezing that as the floating restore
+    // rect would later configure the client to a tiny size when switching to
+    // floating mode. Fall back to a default size based on the usable area
+    // only when the rect is clearly degenerate (frame + titlebar at most).
+    // 50px is a conservative threshold that no real app's natural size ever
+    // falls under.
+    const DEGENERATE_SIZE_PX = 50;
+    if (width < DEGENERATE_SIZE_PX || height < DEGENERATE_SIZE_PX) {
+      width = Math.round(logicalWidth * 0.6);
+      height = Math.round(logicalHeight * 0.7);
+    }
+
+    return {
+      x: logicalX + (logicalWidth - width) / 2,
+      y: Math.max(logicalY, logicalY + (logicalHeight - height) / 2),
+      width,
+      height,
+    };
+  }
+
+  private keepBelowPanel(rect: ManagedWindowRect): ManagedWindowRect {
+    const usable = COMPOSITOR.layer.usableArea(this.monitor);
+    if (!usable || read(rect.y) >= usable.y) return rect;
+    return { ...rect, y: usable.y };
+  }
+
+  private viewportRectToFloatingContentRect(
+    rect: ManagedWindowRect,
+  ): ManagedWindowRect {
+    return {
+      x: read(rect.x) + this.physicalAlignedScrollOffset(),
+      y: read(rect.y),
+      width: read(rect.width),
+      height: read(rect.height),
+    };
+  }
+
+  private floatingContentRectToViewportRect(
+    rect: ManagedWindowRect,
+  ): ManagedWindowRect {
+    return {
+      x: read(rect.x) - this.physicalAlignedScrollOffset(),
+      y: read(rect.y),
+      width: read(rect.width),
+      height: read(rect.height),
+    };
+  }
+
+  /**
+   * Scroll offset quantized to the monitor's physical pixel grid (multiples
+   * of 1/scale). Subtracting the same 1/scale-multiple from every window
+   * keeps each physical position at `round(x_i × scale) − k` with one shared
+   * integer k, so adjacent windows move pixel-rigidly while scrolling. A raw
+   * fractional offset rounds independently per window and makes the gaps
+   * between neighbours oscillate by ±1 physical px. The raw accumulator in
+   * `scrollOffset` stays untouched so slow gesture deltas below half a
+   * physical pixel still accumulate instead of stalling.
+   */
+  private physicalAlignedScrollOffset(): number {
+    const scale = COMPOSITOR.output.current[this.monitor]?.scale ?? 0;
+    if (!Number.isFinite(scale) || scale <= 0) {
+      return this.scrollOffset;
+    }
+    return Math.round(this.scrollOffset * scale) / scale;
+  }
+
+  private clampRectToViewport(rect: ManagedWindowRect): ManagedWindowRect {
+    const viewport = this.tileViewportRect();
+    const width = read(rect.width);
+    const height = read(rect.height);
+    const minX = read(viewport.x);
+    const minY = read(viewport.y);
+    const maxX = minX + Math.max(0, read(viewport.width) - width);
+    const maxY = minY + Math.max(0, read(viewport.height) - height);
+    return {
+      x: clamp(read(rect.x), minX, maxX),
+      y: clamp(read(rect.y), minY, maxY),
+      width,
+      height,
+    };
+  }
+
+  private scrollToWindow(
+    _window: WaylandWindow,
+    _options: { force?: boolean } = {},
+  ) {
+    this.stopKineticScroll();
+    this.scrollOffset = 0;
+  }
+
+  private clampScrollOffset(_tileCount: number) {
+    // The entire grid is on screen: focus, drag and gestures share zero pan.
+    this.scrollOffset = 0;
+  }
+
+  private tileWidthForWindow(
+    window: WaylandWindow,
+    viewportRect: ManagedWindowRect,
+  ): number {
+    if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+      return read(this.maximizedRootRect(window).width);
+    }
+
+    const width =
+      this.tileWidthByWindowId.get(window.id) ??
+      this.defaultTileWidth(viewportRect);
+    return clamp(
+      width,
+      this.minTileWidth(window, viewportRect),
+      Math.max(
+        this.minTileWidth(window, viewportRect),
+        this.maxTileWidth(window),
+      ),
+    );
+  }
+
+  private setTileWidthFromRect(
+    window: WaylandWindow,
+    rect: ManagedWindowRect,
+    overwrite: boolean,
+  ) {
+    if (!overwrite && this.tileWidthByWindowId.has(window.id)) {
+      return;
+    }
+    const viewportRect = this.tileViewportRect();
+    this.tileWidthByWindowId.set(
+      window.id,
+      clamp(
+        read(rect.width),
+        this.minTileWidth(window, viewportRect),
+        Math.max(
+          this.minTileWidth(window, viewportRect),
+          this.maxTileWidth(window),
+        ),
+      ),
+    );
+  }
+
+  private defaultTileWidth(viewportRect: ManagedWindowRect): number {
+    return Math.max(
+      TILE_MIN_WIDTH,
+      read(viewportRect.width) * TILE_WIDTH_RATIO,
+    );
+  }
+
+  private minTileWidth(
+    window: WaylandWindow,
+    viewportRect: ManagedWindowRect,
+  ): number {
+    const constraints = window.sizeConstraints();
+    const extra = this.rootClientWidthExtra(window);
+    return Math.max(
+      TILE_MIN_WIDTH,
+      (constraints.min?.width ?? 1) + extra,
+      read(viewportRect.width) * 0.2,
+    );
+  }
+
+  private maxTileWidth(window: WaylandWindow): number {
+    const constraints = window.sizeConstraints();
+    const extra = this.rootClientWidthExtra(window);
+    const max = constraints.max?.width;
+    return max && max > 0 ? max + extra : Number.POSITIVE_INFINITY;
+  }
+
+  private rootClientWidthExtra(window: WaylandWindow): number {
+    const natural = this.naturalRootRect(window);
+    return Math.max(0, read(natural.width) - window.position.width);
+  }
+
+  private tileContentWidth(
+    tileable: WaylandWindow[],
+    viewportRect: ManagedWindowRect,
+  ): number {
+    if (tileable.length === 0) {
+      return 0;
+    }
+    return (
+      tileable.reduce(
+        (sum, window) => sum + this.tileWidthForWindow(window, viewportRect),
+        0,
+      ) +
+      (tileable.length - 1) * TILE_GAP
+    );
+  }
+
+  private tileViewportRect(): ManagedWindowRect {
+    const monitor = COMPOSITOR.output.current[this.monitor];
+    const usableRect = COMPOSITOR.layer.usableArea(this.monitor);
+    const base =
+      usableRect ??
+      (monitor?.resolution
+        ? {
+            x: monitor.position.x,
+            y: monitor.position.y,
+            width: monitor.resolution.width / monitor.scale,
+            height: monitor.resolution.height / monitor.scale,
+          }
+        : {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+          });
+
+    return insetRect(base, {
+      top: TILE_MARGIN,
+      right: TILE_MARGIN,
+      bottom: TILE_MARGIN,
+      left: TILE_MARGIN,
+    });
+  }
+
+  private fullscreenRootRect(window: WaylandWindow): ManagedWindowRect {
+    const monitor = COMPOSITOR.output.current[this.monitor];
+    if (monitor?.resolution) {
+      return {
+        x: monitor.position.x,
+        y: monitor.position.y,
+        width: monitor.resolution.width / monitor.scale,
+        height: monitor.resolution.height / monitor.scale,
+      };
+    }
+    return window.state[WINDOW_STATE_RECT]();
+  }
+}
+
+function workspaceKey(monitor: string, index: number): string {
+  return `${monitor}:${index}`;
+}
+
+function constrainedMax(
+  constraints: WindowSizeConstraints,
+  axis: "width" | "height",
+  extra: number,
+): number {
+  const max = constraints.max?.[axis];
+  return max && max > 0 ? max + extra : Number.POSITIVE_INFINITY;
+}
+
+function resizeOriginForAxis(
+  start: WindowResizeRect,
+  current: WindowResizeRect,
+  constrainedSize: number,
+  negativeEdge: boolean,
+  axis: "x" | "y",
+): number {
+  if (!negativeEdge) {
+    return current[axis];
+  }
+
+  const startSize = axis === "x" ? start.width : start.height;
+  return start[axis] + startSize - constrainedSize;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function managedRectContainsPoint(
+  rect: ManagedWindowRect,
+  x: number,
+  y: number,
+): boolean {
+  const left = read(rect.x);
+  const top = read(rect.y);
+  return (
+    x >= left &&
+    x < left + read(rect.width) &&
+    y >= top &&
+    y < top + read(rect.height)
+  );
+}
+
+function rectCenterX(rect: ManagedWindowRect): number {
+  return read(rect.x) + read(rect.width) / 2;
+}
+
+function insetRect(
+  rect: ManagedWindowRect,
+  padding: { top: number; right: number; bottom: number; left: number },
+): ManagedWindowRect {
+  const width = Math.max(1, read(rect.width) - padding.left - padding.right);
+  const height = Math.max(1, read(rect.height) - padding.top - padding.bottom);
+  return {
+    x: read(rect.x) + padding.left,
+    y: read(rect.y) + padding.top,
+    width,
+    height,
+  };
+}
+
+function snapshotManagedRect(rect: ManagedWindowRect): ManagedWindowRect {
+  return {
+    x: read(rect.x),
+    y: read(rect.y),
+    width: read(rect.width),
+    height: read(rect.height),
+  };
+}
+
+function managedRectEquals(
+  a: ManagedWindowRect,
+  b: ManagedWindowRect,
+): boolean {
+  return (
+    read(a.x) === read(b.x) &&
+    read(a.y) === read(b.y) &&
+    read(a.width) === read(b.width) &&
+    read(a.height) === read(b.height)
+  );
+}
+
+function isLayoutSnapZone(zone: SnapZone | null): zone is LayoutSnapZone {
+  return zone !== null && zone !== "maximize";
+}
+
+function isLeftSnapZone(zone: LayoutSnapZone): boolean {
+  return zone === "left" || zone === "top-left" || zone === "bottom-left";
+}
+
+function isRightSnapZone(zone: LayoutSnapZone): boolean {
+  return zone === "right" || zone === "top-right" || zone === "bottom-right";
+}
+
+function isTopSnapZone(zone: LayoutSnapZone): boolean {
+  return zone === "top-left" || zone === "top-right";
+}
+
+function isBottomSnapZone(zone: LayoutSnapZone): boolean {
+  return zone === "bottom-left" || zone === "bottom-right";
+}
+
+function snapColumn(zone: LayoutSnapZone): SnapColumn {
+  return isLeftSnapZone(zone) ? "left" : "right";
+}
+
+function snapZonesConflict(
+  current: SnapZone | null,
+  next: LayoutSnapZone,
+): boolean {
+  if (!isLayoutSnapZone(current)) {
+    return false;
+  }
+  if (current === next) {
+    return true;
+  }
+
+  if (next === "left") {
+    return current === "top-left" || current === "bottom-left";
+  }
+  if (next === "right") {
+    return current === "top-right" || current === "bottom-right";
+  }
+  if (current === "left") {
+    return next === "top-left" || next === "bottom-left";
+  }
+  if (current === "right") {
+    return next === "top-right" || next === "bottom-right";
+  }
+  return false;
+}
+
+function averageOr(values: number[], fallback: number): number {
+  if (values.length === 0) {
+    return fallback;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function withManagedWindowOnlySSDRebuildSuppressed<T>(
+  callback: () => T,
+  options: { strict?: boolean } = {},
+): T {
+  return COMPOSITOR.runtime.withSSDRebuildSuppressed(
+    options.strict
+      ? STRICT_MANAGED_WINDOW_ONLY_REBUILD_SUPPRESSION
+      : MANAGED_WINDOW_ONLY_REBUILD_SUPPRESSION,
+    callback,
+  );
+}
+
+function scheduleOpenAnimation(window: WaylandWindow): void {
+  playWindowWave(window, true);
+}
+
+function scheduleCloseAnimation(window: WaylandWindow): void {
+  playWindowWave(window, false, window.state[WINDOW_STATE_MINIMIZED](), "dissolve");
+}
+
+function scheduleMinimizeAnimation(
+  window: WaylandWindow,
+  minimized: boolean,
+): void {
+  playWindowWave(window, !minimized);
+}
+
+function scheduleWorkspaceVisualAnimation(
+  window: WaylandWindow,
+  fromOffsetY: number,
+  toOffsetY: number,
+  fromOpacity: number,
+  toOpacity: number,
+  easing: EasingFunction,
+  duration: number,
+): void {
+  cancelWorkspaceVisualAnimation(window);
+  window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+  window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(toOpacity);
+
+  window.scheduleAnimation({
+    channel: WORKSPACE_VISUAL_RECT_ANIMATION_CHANNEL,
+    rect: {
+      from: { x: 0, y: fromOffsetY, width: 0, height: 0 },
+      to: { x: 0, y: toOffsetY, width: 0, height: 0 },
+      duration,
+      easing,
+      mode: "add",
+    },
+  });
+  window.scheduleAnimation({
+    channel: WORKSPACE_VISUAL_OPACITY_ANIMATION_CHANNEL,
+    opacity: {
+      from: fromOpacity,
+      to: toOpacity,
+      duration,
+      easing,
+      mode: "override",
+    },
+  });
+}
+
+function resetWorkspaceVisualState(
+  window: WaylandWindow,
+  visible: boolean,
+): void {
+  cancelWorkspaceVisualAnimation(window);
+  window.state[WINDOW_STATE_WORKSPACE_VISIBLE].set(visible);
+  window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y].set(0);
+  window.state[WINDOW_STATE_WORKSPACE_OPACITY].set(visible ? 1 : 0);
+}
+
+function cancelWorkspaceVisualAnimation(window: WaylandWindow): void {
+  window.cancelAnimation(WORKSPACE_VISUAL_ANIMATION_CHANNEL);
+  window.cancelAnimation(WORKSPACE_VISUAL_RECT_ANIMATION_CHANNEL);
+  window.cancelAnimation(WORKSPACE_VISUAL_OPACITY_ANIMATION_CHANNEL);
+}

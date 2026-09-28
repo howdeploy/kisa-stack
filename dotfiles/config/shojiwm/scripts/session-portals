@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${WAYLAND_DISPLAY:?}" "${XDG_CURRENT_DESKTOP:?}"
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM
+systemctl --user try-restart elephant.service
+systemctl --user restart xdg-desktop-portal-gtk.service xdg-desktop-portal-wlr.service
+systemctl --user restart xdg-desktop-portal.service

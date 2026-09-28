@@ -1,0 +1,4 @@
+interface:
+  display_name: "ShojiWM Desktop"
+  short_description: "Configure the KISA ShojiWM desktop stack"
+  default_prompt: "Use $shojiwm to understand and update my desktop configuration."

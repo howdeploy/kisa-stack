@@ -1,0 +1,126 @@
+# This is the configuration file for Ghostty.
+#
+# This template file has been automatically created at the following
+# path since Ghostty couldn't find any existing config files on your system:
+#
+#   $XDG_CONFIG_HOME/ghostty/config
+#
+# The template does not set any default options, since Ghostty ships
+# with sensible defaults for all options. Users should only need to set
+# options that they want to change from the default.
+#
+# Run `ghostty +show-config --default --docs` to view a list of
+# all available config options and their default values.
+#
+# Additionally, each config option is also explained in detail
+# on Ghostty's website, at https://ghostty.org/docs/config.
+#
+# Ghostty can reload the configuration while running by using the menu
+# options or the bound key (default: Command + Shift + comma on macOS and
+# Control + Shift + comma on other platforms). Not all config options can be
+# reloaded while running; some only apply to new windows and others may require
+# a full restart to take effect.
+
+# Config syntax crash course
+# ==========================
+# # The config file consists of simple key-value pairs,
+# # separated by equals signs.
+# font-family = Iosevka
+# window-padding-x = 2
+#
+# # Spacing around the equals sign does not matter.
+# # All of these are identical:
+# key=value
+# key= value
+# key =value
+# key = value
+#
+# # Any line beginning with a # is a comment. It's not possible to put
+# # a comment after a config option, since it would be interpreted as a
+# # part of the value. For example, this will have a value of "#123abc":
+# background = #123abc
+#
+# # Empty values are used to reset config keys to default.
+# key =
+#
+# # Some config options have unique syntaxes for their value,
+# # which is explained in the docs for that config option.
+# # Just for example:
+# resize-overlay-duration = 4s 200ms
+
+command = /usr/bin/zsh
+theme = Catppuccin Mocha
+minimum-contrast = 4.5
+font-family = monospace
+mouse-hide-while-typing = true
+focus-follows-mouse = true
+gtk-toolbar-style = flat
+gtk-custom-css = @CONFIG_HOME@/ghostty/catppuccin-mocha.css
+split-divider-color = #6b4d7a
+
+# Copy-on-select: выделение мышью сразу копирует в clipboard (X11 PRIMARY-style, но в CLIPBOARD)
+copy-on-select = clipboard
+
+# Мигающий курсор-блок (без переключения на beam в zsh insert mode)
+cursor-style = block
+cursor-style-blink = true
+
+# Scrollback ~50k строк форматированного CLI вывода (значение в байтах, лениво аллоцируется)
+scrollback-limit = 50000000
+
+# Shell integration: автоматически инжектится для zsh при command=/usr/bin/zsh.
+# Features: cursor (форма курсора по prompt mode), title (автозаголовок), sudo (TERM в sudo),
+# ssh-env (COLORTERM/TERM_PROGRAM по ssh), ssh-terminfo (кэш xterm-ghostty terminfo на remote).
+shell-integration = zsh
+shell-integration-features = no-cursor,sudo,title,ssh-env,ssh-terminfo,path
+
+# Layout-independent keybinds for EN/RU
+keybind = ctrl+shift+key_w=close_surface
+keybind = ctrl+shift+key_t=new_tab
+keybind = ctrl+shift+key_n=new_window
+keybind = ctrl+shift+key_c=copy_to_clipboard
+keybind = ctrl+shift+key_v=paste_from_clipboard
+keybind = ctrl+shift+key_a=select_all
+keybind = ctrl+shift+key_p=toggle_command_palette
+keybind = ctrl+shift+key_i=inspector:toggle
+keybind = ctrl+shift+key_e=new_split:down
+keybind = ctrl+shift+key_o=new_split:right
+keybind = ctrl+shift+key_q=quit
+keybind = ctrl+comma=open_config
+keybind = ctrl+shift+comma=reload_config
+keybind = f2=prompt_surface_title
+keybind = super+ctrl+bracket_left=goto_split:previous
+keybind = super+ctrl+bracket_right=goto_split:next
+
+# Layout-independent terminal Ctrl shortcuts
+keybind = ctrl+key_a=text:\x01
+keybind = ctrl+key_b=text:\x02
+keybind = ctrl+key_c=text:\x03
+keybind = ctrl+key_d=text:\x04
+keybind = ctrl+key_e=text:\x05
+keybind = ctrl+key_f=text:\x06
+keybind = ctrl+key_g=text:\x07
+keybind = ctrl+key_h=text:\x08
+keybind = ctrl+key_k=text:\x0B
+keybind = ctrl+key_l=text:\x0C
+keybind = ctrl+key_n=text:\x0E
+keybind = ctrl+key_p=text:\x10
+keybind = ctrl+key_q=text:\x11
+keybind = ctrl+key_r=text:\x12
+keybind = ctrl+key_s=text:\x13
+keybind = ctrl+key_t=text:\x14
+keybind = ctrl+key_u=text:\x15
+keybind = ctrl+key_v=text:\x16
+keybind = ctrl+key_w=text:\x17
+keybind = ctrl+key_y=text:\x19
+keybind = ctrl+key_z=text:\x1A
+
+keybind = ctrl+1=goto_tab:1
+keybind = ctrl+2=goto_tab:2
+keybind = ctrl+3=goto_tab:3
+keybind = ctrl+4=goto_tab:4
+keybind = ctrl+5=goto_tab:5
+keybind = ctrl+6=goto_tab:6
+keybind = ctrl+7=goto_tab:7
+keybind = ctrl+8=goto_tab:8
+keybind = ctrl+9=goto_tab:9

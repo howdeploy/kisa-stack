@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/lucide-icons/lucide",
+  "revision": "66d8f9fc394b8530377e5f6112f0b8908ba01280",
+  "adaptation": "GTK 4.20+ symbolic classes and per-primitive stroke attributes; Lucide geometry unchanged",
+  "icons": {
+    "shoji-lucide-clock-symbolic": "clock",
+    "shoji-lucide-rotate-cw-symbolic": "rotate-cw",
+    "shoji-lucide-power-symbolic": "power",
+    "shoji-lucide-layout-grid-symbolic": "layout-grid",
+    "shoji-lucide-app-window-symbolic": "app-window",
+    "shoji-lucide-folder-symbolic": "folder",
+    "shoji-lucide-file-symbolic": "file",
+    "shoji-lucide-terminal-symbolic": "terminal"
+  }
+}

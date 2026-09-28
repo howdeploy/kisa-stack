@@ -1,0 +1,17 @@
+integrations.env
+wallpapers.json
+*.local.*
+*.qsb
+*.pyc
+__pycache__/
+node_modules/
+.build/
+.audit/
+*.log
+*.sqlite*
+*.db
+*.bak*
+*.backup*
+.env
+.env.*
+!.env.example

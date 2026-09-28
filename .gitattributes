@@ -1,0 +1,2 @@
+# Unified-diff context lines intentionally contain a single space.
+dotfiles/patches/walker/shoji.patch -whitespace

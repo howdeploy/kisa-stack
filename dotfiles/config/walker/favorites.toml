@@ -1,0 +1,29 @@
+# Commands are trusted local configuration, executed only when selected.
+[[favorites]]
+label = "Terminal"
+icon = "utilities-terminal"
+desktop = "com.mitchellh.ghostty.desktop"
+
+[[favorites]]
+label = "Files"
+icon = "system-file-manager"
+desktop = "org.kde.dolphin.desktop"
+
+# Optional examples (install the applications first):
+# [[favorites]]
+# label = "Codex Resume"
+# icon = "utilities-terminal"
+# command = "codex-resume-ghostty"
+#
+# [[favorites]]
+# label = "Telegram"
+# icon = "org.telegram.desktop"
+# desktop = "org.telegram.desktop.desktop"
+#
+# [[favorites]]
+# label = "Brave"
+# icon = "brave-browser"
+# desktop = "brave-browser.desktop"
+#
+# Your Bluetooth recovery alias is deliberately not assumed to exist here.
+# Use an explicit script path after reviewing what it does on your machine.

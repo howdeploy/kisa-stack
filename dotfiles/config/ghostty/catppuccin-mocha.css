@@ -1,0 +1,244 @@
+/* Catppuccin Mocha GTK theme for Ghostty */
+
+/* Base colors:
+ * Crust:    #11111b
+ * Mantle:   #181825
+ * Base:     #1e1e2e
+ * Surface0: #313244
+ * Surface1: #45475a
+ * Surface2: #585b70
+ * Overlay0: #6c7086
+ * Text:     #cdd6f4
+ * Subtext0: #a6adc8
+ * Lavender: #b4befe
+ * Blue:     #89b4fa
+ * Mauve:    #cba6f7
+ * Rosewater:#f5e0dc
+ */
+
+/* Window */
+window,
+window.background {
+    background-color: #1e1e2e;
+    border: none;
+    box-shadow: none;
+}
+
+/* Remove GTK toolbar borders */
+.toolbar,
+toolbar,
+.top-bar,
+.bottom-bar,
+actionbar,
+actionbar > revealer > box {
+    background-color: #181825;
+    border: none;
+    box-shadow: none;
+}
+
+/* Headerbar / Titlebar */
+headerbar {
+    background-color: #181825;
+    color: #cdd6f4;
+    border: none;
+    border-bottom: 1px solid #313244;
+    box-shadow: none;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+headerbar:backdrop {
+    background-color: #11111b;
+    color: #6c7086;
+    border: none;
+    border-bottom: 1px solid #313244;
+    box-shadow: none;
+}
+
+headerbar title {
+    color: #cdd6f4;
+}
+
+headerbar title:backdrop {
+    color: #6c7086;
+}
+
+/* Window controls (close/min/max buttons) */
+windowcontrols button {
+    color: #cdd6f4;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+windowcontrols button:hover {
+    background-color: #313244;
+}
+
+/* Tabs */
+tabbar {
+    background-color: #11111b;
+}
+
+tabbar tab {
+    background-color: #181825;
+    color: #a6adc8;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 4px 12px;
+}
+
+tabbar tab:checked,
+tabbar tab:selected {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border-bottom-color: #b4befe;
+}
+
+tabbar tab:hover {
+    background-color: #313244;
+    color: #cdd6f4;
+}
+
+/* Tab close button */
+tabbar tab button {
+    color: #6c7086;
+}
+
+tabbar tab button:hover {
+    color: #f5e0dc;
+    background-color: #45475a;
+    border-radius: 4px;
+}
+
+/* Notebook (fallback tab container) */
+notebook header {
+    background-color: #11111b;
+    border-color: #313244;
+}
+
+notebook header tab {
+    background-color: #181825;
+    color: #a6adc8;
+    border: none;
+}
+
+notebook header tab:checked {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border-bottom: 2px solid #b4befe;
+}
+
+/* Scrollbar */
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: #45475a;
+    border-radius: 9999px;
+    min-width: 6px;
+    min-height: 6px;
+}
+
+scrollbar slider:hover {
+    background-color: #585b70;
+}
+
+scrollbar slider:active {
+    background-color: #6c7086;
+}
+
+/* Context menu — all layers */
+popover,
+popover.menu,
+popover > contents,
+popover.menu > contents,
+popover > arrow,
+popover.menu > arrow {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+popover > contents,
+popover.menu > contents {
+    border: none;
+    padding: 4px;
+}
+
+popover modelbutton,
+popover.menu modelbutton,
+popover .menuitem,
+popover.menu .menuitem {
+    color: #cdd6f4;
+    background: transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+popover modelbutton:hover,
+popover.menu modelbutton:hover,
+popover .menuitem:hover,
+popover.menu .menuitem:hover {
+    background-color: #313244;
+    color: #cdd6f4;
+}
+
+popover separator,
+popover.menu separator {
+    background-color: #313244;
+    margin: 4px 8px;
+}
+
+popover label,
+popover.menu label {
+    color: #cdd6f4;
+}
+
+popover accelerator,
+popover.menu accelerator {
+    color: #6c7086;
+}
+
+/* Tooltips */
+tooltip {
+    background-color: #181825;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    border-radius: 6px;
+}
+
+/* Selection */
+selection {
+    background-color: #45475a;
+    color: #cdd6f4;
+}
+
+/* Buttons */
+button {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    box-shadow: none;
+}
+
+button:hover {
+    background-color: #45475a;
+    border-color: #585b70;
+}
+
+button:active {
+    background-color: #585b70;
+}
+
+/* Split divider */
+separator {
+    background-color: rgba(203, 166, 247, 0.4);
+    min-width: 2px;
+    min-height: 2px;
+}

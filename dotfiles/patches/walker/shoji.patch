@@ -1,0 +1,425 @@
+diff --git a/src/main.rs b/src/main.rs
+index 3eea3da..6b145d7 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -6,6 +6,7 @@ mod preview;
+ mod protos;
+ mod providers;
+ mod renderers;
++mod shoji;
+ mod state;
+ mod theme;
+ mod ui;
+@@ -649,6 +650,7 @@ fn activate(app: &Application) {
+         handle_grid_setting();
+     }
+ 
++    crate::ui::window::cancel_close();
+     with_window(|w| {
+         setup_css(get_theme());
+ 
+diff --git a/src/renderers/mod.rs b/src/renderers/mod.rs
+index cb6783e..0e130bb 100644
+--- a/src/renderers/mod.rs
++++ b/src/renderers/mod.rs
+@@ -7,7 +7,7 @@ use crate::ui::window::{quit, with_window};
+ use gtk4::gdk::ContentProvider;
+ use gtk4::gio::File;
+ use gtk4::gio::prelude::FileExt;
+-use gtk4::prelude::{ListItemExt, WidgetExt};
++use gtk4::prelude::{BoxExt, ListItemExt, WidgetExt};
+ use gtk4::{Box, Builder, DragSource, Label, ListItem, glib};
+ use std::path::Path;
+ 
+@@ -78,7 +78,28 @@ pub fn create_item(list_item: &ListItem, item: &Item, theme: &Theme) {
+         p.subtext_transformer(item, &text);
+     }
+ 
+-    p.image_transformer(&b, list_item, item);
++    let shoji_icon = (crate::state::get_theme() == "shoji")
++        .then(|| crate::shoji::result_icon(item)).flatten();
++    if let (Some(icon), Some(image)) = (shoji_icon, b.object::<gtk4::Image>("ItemImage")) {
++        image.set_icon_name(Some(icon));
++        image.set_pixel_size(20);
++        image.set_visible(true);
++        if let Some(glyph) = b.object::<Label>("ItemImageFont") {
++            glyph.set_visible(false);
++        }
++    } else {
++        p.image_transformer(&b, list_item, item);
++    }
++
++    if crate::state::get_theme() == "shoji"
++        && let Some(kind) = crate::shoji::result_kind(item)
++    {
++        itembox.add_css_class(if item.provider == "desktopapplications" { "kind-application" } else { "kind-script" });
++        let tag = Label::new(Some(kind));
++        tag.add_css_class("item-kind");
++        tag.set_valign(gtk4::Align::Center);
++        itembox.append(&tag);
++    }
+ 
+     if let Some(text) = b.object::<Label>("QuickActivation") {
+         if is_hide_qa() || get_config().hide_quick_activation {
+diff --git a/src/ui/window.rs b/src/ui/window.rs
+index f10c9b4..ec6d5cd 100644
+--- a/src/ui/window.rs
++++ b/src/ui/window.rs
+@@ -71,6 +71,8 @@ use std::{
+ thread_local! {
+     pub static WINDOWS: OnceCell<HashMap<String, WindowData>> = const { OnceCell::new() };
+     pub static CSS_PROVIDER: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
++    static CLOSE_TIMER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
++    static CLOSING: Cell<bool> = const { Cell::new(false) };
+ }
+ 
+ pub fn set_css_provider(provider: CssProvider) {
+@@ -352,6 +354,15 @@ pub fn setup_theme_window(app: &Application, val: &Theme) -> Result<WindowData,
+     setup_list_behavior(&ui);
+     setup_mouse_handling(&ui);
+ 
++    crate::shoji::setup(&ui.builder, app)?;
++    if ui.builder.object::<gtk4::FlowBox>("ShojiFavorites").is_some() {
++        let close_app = app.clone();
++        ui.window.connect_close_request(move |_| {
++            quit(&close_app, true);
++            glib::Propagation::Stop
++        });
++    }
++
+     ui.window.set_application(Some(app));
+     ui.window.set_css_classes(&[]);
+ 
+@@ -660,6 +671,12 @@ fn setup_keyboard_handling(ui: &WindowData) {
+         let m = m & !ModifierType::LOCK_MASK;
+ 
+         let handled = with_window(|w| {
++            // Let the fixed favorite/footer buttons receive native keyboard input.
++            if k != gdk::Key::Escape
++                && w.window.focus().is_some_and(|f| f.has_css_class("shoji-button"))
++            {
++                return false;
++            }
+             if !is_connected() && !is_dmenu() {
+                 if let Some(action) = get_bind(k, m, is_grid())
+                     && action.action == ACTION_CLOSE
+@@ -910,7 +927,43 @@ fn reset_provider_states() {
+     }
+ }
+ 
++pub fn cancel_close() {
++    if let Some(timer) = CLOSE_TIMER.with(|timer| timer.borrow_mut().take()) {
++        timer.remove();
++    }
++    CLOSING.set(false);
++    with_window(|w| {
++        w.box_wrapper.remove_css_class("shoji-closing");
++        w.box_wrapper.set_sensitive(true);
++    });
++}
++
+ pub fn quit(app: &Application, cancelled: bool) {
++    if CLOSING.replace(true) {
++        return;
++    }
++
++    let animate = get_theme() == "shoji"
++        && with_window(|w| w.window.is_mapped())
++        && gtk4::Settings::default().is_some_and(|settings| settings.is_gtk_enable_animations());
++    if animate {
++        with_window(|w| {
++            w.box_wrapper.add_css_class("shoji-closing");
++            w.box_wrapper.set_sensitive(false);
++        });
++        let app = app.clone();
++        // Leave one frame after the 160 ms CSS animation before unmapping.
++        let timer = glib::timeout_add_local_once(std::time::Duration::from_millis(180), move || {
++            CLOSE_TIMER.with(|timer| timer.borrow_mut().take());
++            finish_quit(&app, cancelled);
++        });
++        CLOSE_TIMER.with(|pending| *pending.borrow_mut() = Some(timer));
++    } else {
++        finish_quit(app, cancelled);
++    }
++}
++
++fn finish_quit(app: &Application, cancelled: bool) {
+     reset_provider_states();
+ 
+     if GLOBAL_DMENU_SENDER.read().unwrap().is_some() {
+@@ -931,6 +984,8 @@ pub fn quit(app: &Application, cancelled: bool) {
+ 
+     with_window(|w| {
+         w.window.set_visible(false);
++        w.box_wrapper.remove_css_class("shoji-closing");
++        w.box_wrapper.set_sensitive(true);
+ 
+         while let Some(preview) = w.builder.object::<Box>("Preview")
+             && let Some(child) = preview.first_child()
+@@ -1043,6 +1098,7 @@ pub fn quit(app: &Application, cancelled: bool) {
+ 
+         set_theme(get_config().theme.clone());
+     });
++    CLOSING.set(false);
+ }
+ 
+ pub fn select_up() {
+diff --git a/src/shoji.rs b/src/shoji.rs
+new file mode 100644
+index 0000000..65fad4a
+--- /dev/null
++++ b/src/shoji.rs
+@@ -0,0 +1,253 @@
++use gtk4::{Application, Builder, Button, EventControllerFocus, FlowBox, Image, Label, Window, glib, prelude::*};
++use serde::Deserialize;
++use std::process::{Command, Stdio};
++use crate::protos::generated_proto::query::query_response::Item;
++
++pub fn result_icon(item: &Item) -> Option<&'static str> {
++    match item.provider.as_str() {
++        "desktopapplications" if item.icon.is_empty() => Some("shoji-lucide-app-window-symbolic"),
++        "files" if std::path::Path::new(&item.text).is_dir() => Some("shoji-lucide-folder-symbolic"),
++        "files" => Some("shoji-lucide-file-symbolic"),
++        "providerlist" => match item.identifier.as_str() {
++            "desktopapplications" => Some("shoji-lucide-layout-grid-symbolic"),
++            "files" => Some("shoji-lucide-folder-symbolic"),
++            _ => None,
++        },
++        _ => None,
++    }
++}
++
++pub fn result_kind(item: &Item) -> Option<&'static str> {
++    match item.provider.as_str() {
++        "desktopapplications" => Some("Приложение"),
++        provider if provider.starts_with("menus:")
++            && item.actions.iter().any(|action| action == "menus:default") => Some("Скрипт"),
++        _ => None,
++    }
++}
++
++#[derive(Default, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Favorites {
++    #[serde(default)]
++    favorites: Vec<Favorite>,
++}
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Favorite {
++    label: String,
++    #[serde(default)]
++    icon: String,
++    desktop: Option<String>,
++    command: Option<String>,
++    #[serde(default)]
++    terminal: bool,
++}
++
++impl Favorite {
++    fn kind(&self) -> &'static str {
++        if self.desktop.is_some() { "Приложение" } else { "Скрипт" }
++    }
++
++    fn validate(&self) -> Result<(), String> {
++        if self.label.trim().is_empty() {
++            return Err("У избранного элемента отсутствует название".into());
++        }
++        match (&self.desktop, &self.command) {
++            (Some(id), None) if !id.trim().is_empty() && !self.terminal => Ok(()),
++            (None, Some(cmd)) if !cmd.trim().is_empty() => Ok(()),
++            _ => Err(format!(
++                "{}: укажи desktop или command; terminal применим только к command",
++                self.label
++            )),
++        }
++    }
++
++    fn launch(&self) -> Result<(), String> {
++        if let Some(id) = &self.desktop {
++            return spawn(Command::new("gtk-launch").arg(id));
++        }
++        let command = self.command.as_deref().ok_or("Не указана команда")?;
++        if self.terminal {
++            spawn(Command::new("ghostty").args([
++                "--gtk-single-instance=false", "-e", "bash", "-ic", command,
++            ]))
++        } else {
++            spawn(Command::new("bash").args(["-ic", command]))
++        }
++    }
++}
++
++fn spawn(command: &mut Command) -> Result<(), String> {
++    let mut child = command.stdin(Stdio::null()).spawn().map_err(|e| e.to_string())?;
++    std::thread::spawn(move || {
++        if let Err(error) = child.wait() {
++            eprintln!("Walker: {error}");
++        }
++    });
++    Ok(())
++}
++
++fn finish(app: &Application, result: Result<(), String>) {
++    match result {
++        Ok(()) => crate::ui::window::quit(app, false),
++        Err(error) => {
++            crate::state::set_error(error);
++            crate::ui::window::check_error();
++        }
++    }
++}
++
++fn update_clock(clock: &Label) {
++    let now = chrono::Local::now();
++    clock.set_text(&now.format("%H:%M").to_string());
++    clock.set_tooltip_text(Some(&now.format("%d.%m.%Y").to_string()));
++}
++
++pub fn setup(builder: &Builder, app: &Application) -> Result<(), String> {
++    let Some(favorites) = builder.object::<FlowBox>("ShojiFavorites") else {
++        return Ok(());
++    };
++    let window = builder.object::<Window>("Window").ok_or("missing 'Window' object")?;
++    if let Some(config_home) = xdg::BaseDirectories::with_prefix("walker").get_config_home() {
++        gtk4::IconTheme::for_display(&WidgetExt::display(&window))
++            .add_search_path(config_home.join("themes/shoji/icons"));
++    }
++    let focus = EventControllerFocus::new();
++    let focus_app = app.clone();
++    focus.connect_leave(move |controller| {
++        // Ignore focus loss caused by hiding the menu itself.
++        if controller.widget().is_some_and(|window| window.is_mapped()) {
++            crate::ui::window::quit(&focus_app, true);
++        }
++    });
++    window.add_controller(focus);
++
++    let config = match xdg::BaseDirectories::with_prefix("walker").find_config_file("favorites.toml") {
++        Some(path) => ::config::Config::builder()
++            .add_source(::config::File::from(path))
++            .build()
++            .and_then(|c| c.try_deserialize::<Favorites>())
++            .map_err(|e| format!("favorites.toml: {e}"))?,
++        None => Favorites::default(),
++    };
++    for favorite in &config.favorites {
++        favorite.validate()?;
++    }
++    if let Some(empty) = builder.object::<Label>("ShojiFavoritesEmpty") {
++        empty.set_visible(config.favorites.is_empty());
++    }
++    for favorite in config.favorites {
++        let button = Button::new();
++        button.add_css_class("shoji-button");
++        button.add_css_class("favorite");
++        button.add_css_class(if favorite.desktop.is_some() { "kind-application" } else { "kind-script" });
++        button.set_hexpand(true);
++        let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
++        let icon = if !favorite.icon.is_empty() {
++            &favorite.icon
++        } else if favorite.desktop.is_some() {
++            "shoji-lucide-app-window-symbolic"
++        } else {
++            "shoji-lucide-terminal-symbolic"
++        };
++        let image = Image::from_icon_name(icon);
++        image.set_pixel_size(24);
++        let label = Label::new(Some(&favorite.label));
++        label.set_xalign(0.0);
++        label.set_hexpand(true);
++        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
++        let tag = Label::new(Some(favorite.kind()));
++        tag.add_css_class("item-kind");
++        tag.set_valign(gtk4::Align::Center);
++        content.append(&image);
++        content.append(&label);
++        content.append(&tag);
++        button.set_child(Some(&content));
++        let app = app.clone();
++        button.connect_clicked(move |_| finish(&app, favorite.launch()));
++        favorites.insert(&button, -1);
++    }
++
++    if let Some(clock) = builder.object::<Label>("ShojiClock") {
++        update_clock(&clock);
++        clock.connect_map(update_clock);
++        let weak_clock = clock.downgrade();
++        glib::timeout_add_seconds_local(1, move || {
++            let Some(clock) = weak_clock.upgrade() else { return glib::ControlFlow::Break; };
++            if clock.is_mapped() { update_clock(&clock); }
++            glib::ControlFlow::Continue
++        });
++    }
++    for (id, action) in [("ShojiReboot", "reboot"), ("ShojiPoweroff", "poweroff")] {
++        if let Some(button) = builder.object::<Button>(id) {
++            let app = app.clone();
++            button.connect_clicked(move |_| finish(&app, spawn(Command::new("systemctl").arg(action))));
++        }
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn app_logos_use_native_loader_with_lucide_fallback() {
++        let mut item = Item::default();
++        item.provider = "desktopapplications".into();
++        assert_eq!(result_icon(&item), Some("shoji-lucide-app-window-symbolic"));
++        item.icon = "brave-browser".into();
++        assert_eq!(result_icon(&item), None);
++        item.icon = "/usr/share/icons/example.svg".into();
++        assert_eq!(result_icon(&item), None);
++        item.provider = "providerlist".into();
++        item.identifier = "desktopapplications".into();
++        assert_eq!(result_icon(&item), Some("shoji-lucide-layout-grid-symbolic"));
++        item.identifier = "files".into();
++        assert_eq!(result_icon(&item), Some("shoji-lucide-folder-symbolic"));
++        item.provider = "files".into();
++        item.text = env!("CARGO_MANIFEST_DIR").into();
++        assert_eq!(result_icon(&item), Some("shoji-lucide-folder-symbolic"));
++        item.text = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml").into();
++        assert_eq!(result_icon(&item), Some("shoji-lucide-file-symbolic"));
++        item.provider = "clipboard".into();
++        assert_eq!(result_icon(&item), None);
++    }
++
++    #[test]
++    fn result_tags_distinguish_commands_from_navigation() {
++        let mut item = Item::default();
++        item.provider = "desktopapplications".into();
++        assert_eq!(result_kind(&item), Some("Приложение"));
++        item.provider = "menus:system".into();
++        item.actions = vec!["menus:default".into()];
++        assert_eq!(result_kind(&item), Some("Скрипт"));
++        item.actions = vec!["menus:open".into()];
++        assert_eq!(result_kind(&item), None);
++        item.provider = "files".into();
++        assert_eq!(result_kind(&item), None);
++        item.provider = "providerlist".into();
++        assert_eq!(result_kind(&item), None);
++    }
++
++    #[test]
++    fn favorites_require_one_nonempty_target() {
++        let mut favorite = Favorite {
++            label: "Terminal command".into(), icon: String::new(),
++            desktop: None, command: Some("my-alias".into()), terminal: true,
++        };
++        assert!(favorite.validate().is_ok());
++        assert_eq!(favorite.kind(), "Скрипт");
++        favorite.desktop = Some("app.desktop".into());
++        assert!(favorite.validate().is_err());
++        favorite.command = None;
++        assert!(favorite.validate().is_err());
++        favorite.terminal = false;
++        assert!(favorite.validate().is_ok());
++        assert_eq!(favorite.kind(), "Приложение");
++        favorite.desktop = Some(" ".into());
++        assert!(favorite.validate().is_err());
++    }
++}

@@ -1,0 +1,30 @@
+{
+  "snapshot_date": "2026-09-28",
+  "shojiwm": {
+    "repository": "https://github.com/howdeploy/ShojiWM",
+    "branch": "howdeploy/stack",
+    "revision": "f61a5f98117c355fe131e3d550970de0ed6a5120",
+    "upstream": "https://github.com/bea4dev/ShojiWM",
+    "upstream_revision": "3fef0c862caab18332947f5e4ede83ff446312a7",
+    "pull_requests": [105, 106, 107, 108, 109]
+  },
+  "walker": {
+    "repository": "https://github.com/abenz1267/walker",
+    "revision": "56c9e2b69e7d2b00f0f9481ae8c89f53810c1de5",
+    "version": "2.17.1",
+    "patch": "patches/walker/shoji.patch"
+  },
+  "shell_ancestry": {
+    "repository": "https://github.com/bea4dev/shoji-bar-3",
+    "revision": "1f9ca9309e6dbdec0a785bd6a86926a6406b4171",
+    "adapted_files": ["Dock.qml", "Media.qml"]
+  },
+  "reference_runtime": {
+    "distribution": "Manjaro / Arch Linux family",
+    "quickshell": "0.3.1",
+    "qt": "6.11.2",
+    "elephant": "2.22.1",
+    "xwayland_satellite": "0.8.2",
+    "rust_for_shojiwm": "1.94.0"
+  }
+}

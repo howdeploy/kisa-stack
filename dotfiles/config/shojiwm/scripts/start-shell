@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# This is a local, trusted shell file. Keep credentials in each provider's CLI.
+settings="${XDG_CONFIG_HOME:-$HOME/.config}/shoji-shell/integrations.env"
+if [[ -f "$settings" ]]; then
+    set -a
+    source "$settings"
+    set +a
+fi
+exec quickshell --no-duplicate --path "${XDG_CONFIG_HOME:-$HOME/.config}/shoji-shell"

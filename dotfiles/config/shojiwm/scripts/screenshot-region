@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec 9>"${XDG_RUNTIME_DIR:?}/shoji-screenshot.lock"
+flock -n 9 || exit 0
+export QT_QPA_PLATFORM=wayland
+monitor_index=$(python3 - <<'PY'
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+
+try:
+    path = f"{os.environ['XDG_RUNTIME_DIR']}/shojiwm-{os.environ['WAYLAND_DISPLAY']}.sock"
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(2)
+        sock.connect(path)
+        sock.sendall(b'{"id":1,"method":"workspaces.get"}\n')
+        with sock.makefile('r') as messages:
+            for _ in range(32):
+                reply = json.loads(messages.readline(1024 * 1024))
+                if reply.get('id') == 1:
+                    monitor = reply['result']['currentMonitor']
+                    break
+            else:
+                raise ValueError('ShojiWM did not return the active monitor')
+    # Flameshot uses Qt screen indices, which need not match compositor order.
+    screens = subprocess.run(
+        ['qtdiag6', '--no-gl', '--no-vulkan', '--no-rhi'],
+        check=True, capture_output=True, text=True, timeout=5,
+    ).stdout
+    matches = re.findall(r'^# (\d+) ("(?:[^"\\]|\\.)*") Depth:', screens, re.MULTILINE)
+    index = next((index for index, name in matches if json.loads(name) == monitor), None)
+    if index is None:
+        raise ValueError(f'Qt does not expose active monitor {monitor!r}')
+    print(index)
+except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+    print(f'Не удалось определить монитор для скриншота: {error}', file=sys.stderr)
+    sys.exit(1)
+PY
+)
+flameshot screen --number "$monitor_index" --edit 9>&-
