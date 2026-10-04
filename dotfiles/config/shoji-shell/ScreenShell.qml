@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
@@ -19,11 +18,7 @@ Scope {
     readonly property bool panelOpen: shell.panelScreen === output.name && shell.panelPage !== ""
     readonly property string activeWorkspace: workspaces.filter(w => w.active).map(w => w.id).join(",")
     onActiveWorkspaceChanged: { if (panelOpen) shell.panelPage = ""; }
-    onPanelOpenChanged: {
-        if (panelOpen) panelLoader.activeAsync = true;
-        else if (!panelLoader.active) panelLoader.activeAsync = false;
-    }
-    Component.onCompleted: { if (panelOpen) panelLoader.activeAsync = true; }
+    onPanelOpenChanged: { if (panelOpen) panelLoader.active = true; }
     SystemClock { id: clock; precision: SystemClock.Minutes }
 
     Socket {
@@ -34,11 +29,21 @@ Scope {
             write(JSON.stringify({ id: 1, method: "dock.get", params: {
                 monitor: screenShell.output.name, width: dockWindow.width, height: dockWindow.height
             } }) + "\n");
+            write(JSON.stringify({ method: "mateengine.shell", params: {
+                monitor: screenShell.output.name,
+                visible: dockPill.visible && dockPill.y < dockWindow.height,
+                dock: {
+                    x: (screenShell.output.width - dockWindow.width) / 2,
+                    y: screenShell.output.height - dockWindow.height,
+                    width: dockPill.width,
+                    height: dockPill.height
+                }
+            } }) + "\n");
             flush();
         }
         onConnectionStateChanged: {
             if (connected) refresh();
-            else { dockWindow.occluded = false; dockWindow.nearby = false; screenShell.chromeFullscreen = false; }
+            else { dockWindow.occluded = false; dockWindow.nearby = false; dockWindow.petSeated = false; screenShell.chromeFullscreen = false; }
         }
         parser: SplitParser {
             onRead: data => {
@@ -47,6 +52,7 @@ Scope {
                     if (message.id === 1 && message.result) {
                         dockWindow.occluded = message.result.occluded === true;
                         dockWindow.nearby = message.result.nearby === true;
+                        dockWindow.petSeated = message.result.petSeated === true;
                         screenShell.chromeFullscreen = message.result.chromeFullscreen === true;
                     } else if (message.event === "dock.proximity" && message.payload.monitor === screenShell.output.name) {
                         dockWindow.nearby = message.payload.inside === true;
@@ -105,8 +111,8 @@ Scope {
         color: "transparent"
         WlrLayershell.layer: screenShell.chromeFullscreen ? WlrLayer.Bottom : WlrLayer.Top
         WlrLayershell.namespace: "shoji-shell"
-        // Keep toggle clicks from dismissing the popup before onClicked runs.
-        WlrLayershell.keyboardFocus: screenShell.panelOpen ? WlrKeyboardFocus.None : WlrKeyboardFocus.OnDemand
+        // Native popup grabs require a keyboard-interactive parent.
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
         mask: Region {
             item: workspacePill
             Region { item: clockPill }
@@ -203,9 +209,10 @@ Scope {
 
     PanelWindow {
         id: dockWindow
+        property bool petSeated: false
         property bool occluded: false
         property bool nearby: false
-        readonly property bool shown: !occluded || nearby || dockHover.hovered || dockMenu.visible
+        readonly property bool shown: petSeated || !occluded || nearby || dockHover.hovered || dockMenu.visible
         screen: screenShell.output
         anchors.bottom: true
         implicitWidth: Math.min(screenShell.output.width - 32, Dock.entries.length * 48 + 68)
@@ -213,7 +220,7 @@ Scope {
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "shoji-shell"
+        WlrLayershell.namespace: "shoji-dock"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         mask: Region { x: 0; y: 0; width: dockWindow.shown ? dockWindow.width : 0; height: dockWindow.height }
         Rectangle {
@@ -294,69 +301,69 @@ Scope {
         }
     }
 
-    // Destroy the proxy as well as its native window: Quickshell 0.3.1 adds
-    // proxy size connections on every recreate of a retained layer window.
+    // Preload once so the opening click does not wait for QML construction.
     LazyLoader {
         id: panelLoader
-        PanelWindow {
+        loading: true
+        PopupWindow {
         id: popup
         Binding {
             target: screenShell.shell
             property: "panelReady"
-            value: screenShell.panelOpen && popup.backingWindowVisible && popup.reveal === 1
+            value: screenShell.panelOpen && !popup.dismissed && popup.backingWindowVisible && popup.reveal === 1
         }
-        screen: screenShell.output
-        anchors { top: true; right: true }
-        margins { top: 62; right: 16 }
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "shoji-shell"
-        WlrLayershell.keyboardFocus: screenShell.panelOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+        anchor.window: bar
+        anchor.rect.x: bar.width - width - 16
+        anchor.rect.y: 62
+        grabFocus: true
         implicitWidth: 408
         implicitHeight: panelHeight
         readonly property string requestedPage: screenShell.panelOpen ? screenShell.shell.panelPage : ""
         property string displayedPage: ""
-        property bool hadFocus: false
         property real reveal: 0
+        property bool dismissed: true
         property real panelHeight: Math.max(1, Math.min(screenShell.output.height - 154, popupContent.implicitHeight + 40))
-        visible: screenShell.panelOpen || reveal > 0
+        visible: false
+        onVisibleChanged: {
+            if (visible) return;
+            // Latch dismissal before changing animation or requested state.
+            dismissed = true;
+            revealAnimation.stop();
+            reveal = 0;
+            if (screenShell.panelOpen) screenShell.shell.panelPage = "";
+        }
         color: "transparent"
 
-        Connections {
-            target: panelFocus.Window.window
-            function onActiveChanged(): void {
-                if (panelFocus.Window.active) { popup.hadFocus = true; return; }
-                if (!popup.hadFocus) return;
-                Qt.callLater(() => {
-                    if (screenShell.panelOpen && !panelFocus.Window.active)
-                        screenShell.shell.panelPage = "";
-                });
-            }
-        }
-
         // Keep the page geometry stable until reveal resets after dismissal.
-        onRequestedPageChanged: {
-            if (requestedPage !== "") {
+        function syncPanel() {
+            revealAnimation.stop();
+            const opening = requestedPage !== "";
+            if (opening) {
                 displayedPage = requestedPage;
-                hadFocus = panelFocus.Window.active;
-                Qt.callLater(() => { if (screenShell.panelOpen) panelFocus.forceActiveFocus(); });
-            } else hadFocus = false;
-        }
-        onRevealChanged: {
-            if (reveal === 0 && !screenShell.panelOpen)
-                Qt.callLater(() => { if (!screenShell.panelOpen) panelLoader.active = false; });
-        }
-        onBackingWindowVisibleChanged: { if (backingWindowVisible && screenShell.panelOpen) panelFocus.forceActiveFocus(); }
-        Component.onCompleted: {
-            displayedPage = requestedPage;
-            reveal = Qt.binding(() => screenShell.panelOpen ? 1 : 0);
-            if (!screenShell.panelOpen) panelLoader.active = false;
-        }
-        Behavior on reveal {
-            NumberAnimation {
-                duration: screenShell.panelOpen ? 220 : 160
-                easing.type: screenShell.panelOpen ? Easing.OutCubic : Easing.InCubic
+                dismissed = false;
+                visible = true;
+                Qt.callLater(() => { if (!popup.dismissed && screenShell.panelOpen) panelFocus.forceActiveFocus(); });
+            } else if (dismissed) {
+                return;
             }
+            revealAnimation.from = reveal;
+            revealAnimation.to = opening ? 1 : 0;
+            revealAnimation.duration = opening ? 220 : 160;
+            revealAnimation.easing.type = opening ? Easing.OutCubic : Easing.InCubic;
+            if (reveal === revealAnimation.to) {
+                if (!opening) visible = false;
+                return;
+            }
+            revealAnimation.start();
+        }
+        onRequestedPageChanged: syncPanel()
+        onBackingWindowVisibleChanged: { if (backingWindowVisible && screenShell.panelOpen) panelFocus.forceActiveFocus(); }
+        Component.onCompleted: syncPanel()
+        NumberAnimation {
+            id: revealAnimation
+            target: popup
+            property: "reveal"
+            onFinished: { if (to === 0) popup.visible = false; }
         }
 
         mask: Region { item: screenShell.panelOpen ? panelReveal : null }
@@ -408,14 +415,62 @@ Scope {
                                 ActionButton {
                                     id: trayButton
                                     required property var modelData
+                                    property bool quitRequested: false
                                     hint: modelData.title || modelData.id
                                     icon.source: modelData.icon; icon.color: "transparent"
                                     function showMenu() {
                                         const point = popup.mapFromItem(trayButton, 0, trayButton.height);
                                         modelData.display(popup, point.x, point.y);
                                     }
+                                    function findQuitAction(entries) {
+                                        // ponytail: known RU/EN exit labels; extend when an app uses another label.
+                                        return entries.find(entry => !entry.isSeparator && entry.enabled && !entry.hasChildren
+                                            && /^(quit|exit|выход|выйти|завершить работу|закрыть telegram|quit telegram|выйти из steam)$/i.test(
+                                                entry.text.replace(/[&_]/g, "").replace(/(?:\.{3}|…)$/, "").trim()));
+                                    }
+                                    function tryQuit() {
+                                        if (!quitRequested) return;
+                                        const action = findQuitAction(quitMenu.children ? quitMenu.children.values : []);
+                                        if (!action) return;
+                                        action.triggered();
+                                        quitRequested = false;
+                                        quitTimeout.stop();
+                                    }
+                                    function requestQuit() {
+                                        if (quitRequested) return;
+                                        if (!modelData.hasMenu) { modelData.activate(); return; }
+                                        quitRequested = true;
+                                        quitTimeout.restart();
+                                        Qt.callLater(tryQuit);
+                                    }
+                                    QsMenuOpener {
+                                        id: quitMenu
+                                        menu: trayButton.quitRequested ? trayButton.modelData.menu : null
+                                        onChildrenChanged: Qt.callLater(trayButton.tryQuit)
+                                    }
+                                    Connections {
+                                        target: quitMenu.children
+                                        function onValuesChanged() { Qt.callLater(trayButton.tryQuit); }
+                                    }
+                                    Timer {
+                                        id: quitTimeout
+                                        interval: 1500
+                                        onTriggered: {
+                                            trayButton.tryQuit();
+                                            if (!trayButton.quitRequested) return;
+                                            trayButton.quitRequested = false;
+                                            trayButton.modelData.activate();
+                                        }
+                                    }
                                     onClicked: { if (modelData.onlyMenu) showMenu(); else modelData.activate(); }
-                                    MouseArea { anchors.fill: parent; acceptedButtons: Qt.RightButton; onClicked: trayButton.showMenu() }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.RightButton | Qt.MiddleButton
+                                        onClicked: mouse => {
+                                            if (mouse.button === Qt.MiddleButton) trayButton.requestQuit();
+                                            else trayButton.showMenu();
+                                        }
+                                    }
                                 }
                             }
                             Item { Layout.fillWidth: true }

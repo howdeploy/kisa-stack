@@ -8,8 +8,10 @@ import Quickshell.Io
 Singleton {
     id: root
     readonly property string directory: Settings.wallpaperDirectory
-    readonly property string fallback: Qt.resolvedUrl("assets/default-wallpaper.svg").toString()
+    readonly property string fallback: neutral
+    readonly property string neutral: Qt.resolvedUrl("assets/default-wallpaper.svg").toString()
     property string targetOutput: ""
+    property int pickerRow: 0
     property var outputs: ({})
     property string layoutId: "empty"
     property var document: ({ outputs: {} })
@@ -26,8 +28,28 @@ Singleton {
     property string thumbnailUrl: ""
     signal acceptRequested()
 
-    function current(outputName) { return outputs[outputName] || fallback; }
+    function current(outputName) { return liveFor(outputName) ? neutral : outputs[outputName] || fallback; }
+    function liveLayers(value) {
+        const live = (value || document).live;
+        if (!live) return [];
+        if (Array.isArray(live.layers)) return live.layers;
+        const names = Quickshell.screens.map(s => s.name);
+        return [Object.assign({}, live, { outputs: names, visibleOutputs: names })];
+    }
+    function liveFor(outputName, value) {
+        return liveLayers(value).find(layer => layer.visibleOutputs.includes(outputName)) || null;
+    }
+    function frameFor(outputName) { return liveFor(outputName) ? null : (document.frames || {})[outputName] || null; }
+    function outputsToClear(outputName, span) {
+        if (span) return [];
+        const live = liveFor(outputName);
+        if (live) return live.mode === "span" ? live.visibleOutputs.filter(name => name !== outputName) : [];
+        if (!(frameFor(outputName) || {}).span) return [];
+        return Quickshell.screens.map(s => s.name).filter(name => name !== outputName
+            && !liveFor(name) && (frameFor(name) || {}).span && current(name) === current(outputName));
+    }
     function toggle(outputName) {
+        if (LiveWallpapers.busy) return;
         if (targetOutput !== "") {
             acceptRequested();
             return;
@@ -43,15 +65,23 @@ Singleton {
         targetOutput = "";
     }
     onTargetOutputChanged: { if (!targetOutput) thumbnailQueue = []; }
-    function requestPreviews(index, radius) {
+    function requestPreviews(index, radius, urls) {
         const next = [];
         for (let distance = 0; distance <= radius; distance++) {
             const indices = distance === 0 ? [index] : [index + distance, index - distance];
             for (const i of indices) {
-                if (i < 0 || i >= library.count) continue;
-                const url = library.get(i, "fileUrl").toString();
+                if (i < 0 || i >= (urls ? urls.length : library.count)) continue;
+                const url = urls ? urls[i] : library.get(i, "fileUrl").toString();
+                if (!url) continue;
                 if (!checkedThumbnails[url] && url !== thumbnailUrl) next.push(url);
             }
+        }
+        // Include saved backgrounds on the other output in the desktop miniature.
+        for (const screen of Quickshell.screens) {
+            const live = liveFor(screen.name);
+            const entry = live ? LiveWallpapers.items.find(item => item.path === live.path) : null;
+            const url = entry ? entry.preview : current(screen.name);
+            if (url && !checkedThumbnails[url] && url !== thumbnailUrl && !next.includes(url)) next.push(url);
         }
         thumbnailQueue = next;
         nextThumbnail();
@@ -63,25 +93,60 @@ Singleton {
         thumbnailWorker.command = ["python3", decodeURIComponent(Qt.resolvedUrl("wallpaper-thumbnail.py").toString().replace("file://", "")), thumbnailUrl];
         thumbnailWorker.running = true;
     }
-    function apply(outputName, url, selectedLayout) {
-        if (!ready || saving || !Quickshell.screens.some(s => s.name === outputName)) return;
+    function apply(outputName, url, selectedLayout, liveSelection, frame) {
+        if (!ready || saving || LiveWallpapers.busy || !Quickshell.screens.some(s => s.name === outputName)) return;
         const selected = WidgetLayouts.layouts.find(value => value.id === selectedLayout);
         if (!selected) {
             error = "Раскладка недоступна. Выбери другую или нажми Escape.";
             return;
         }
-        if (selected.id === layoutId && (!url || current(outputName) === url.toString())) {
-            cancel();
+        const next = Object.assign({}, outputs);
+        const affected = frame && frame.span ? Quickshell.screens.map(s => s.name) : [outputName];
+        const cleared = outputsToClear(outputName, !!(frame && frame.span));
+        const frames = Object.assign({}, document.frames || {});
+        for (const name of cleared) {
+            next[name] = neutral;
+            delete frames[name];
+        }
+        for (const name of affected) {
+            if (url) next[name] = url.toString();
+            if (url && frame) frames[name] = frame;
+        }
+        const layers = liveLayers().map(layer => Object.assign({}, layer, {
+            visibleOutputs: layer.visibleOutputs.filter(name => !affected.includes(name) && !cleared.includes(name))
+        })).filter(layer => layer.visibleOutputs.length);
+        if (liveSelection) layers.push(Object.assign({}, liveSelection, {
+            mode: frame && frame.span ? "span" : "single", outputs: affected, visibleOutputs: affected
+        }));
+        pendingOutput = outputName;
+        const nextDocument = Object.assign({}, document, { outputs: next, frames: frames, layout: selected.id,
+            live: layers.length ? { layers: layers } : null });
+        if (liveSelection && liveSelection.crop) {
+            nextDocument.liveCrops = Object.assign({}, document.liveCrops || {});
+            nextDocument.liveCrops[liveSelection.path] = liveSelection.crop;
+        }
+        if (url && frame) {
+            nextDocument.imageCrops = Object.assign({}, document.imageCrops || {});
+            nextDocument.imageCrops[url.toString()] = frame.crop;
+        }
+        if (JSON.stringify(document) === JSON.stringify(nextDocument)) { cancel(); return; }
+        if (nextDocument.live || LiveWallpapers.active || document.live || (frame && frame.span)
+                || (frameFor(outputName) && frameFor(outputName).span)) {
+            LiveWallpapers.begin(nextDocument);
             return;
         }
-        const next = Object.assign({}, outputs);
-        if (url) next[outputName] = url.toString();
-        pendingDocument = Object.assign({}, document, { outputs: next, layout: selected.id });
-        pendingOutput = outputName;
+        saveDocument(nextDocument);
+    }
+    function saveDocument(nextDocument) {
+        if (saving) return;
+        pendingDocument = nextDocument;
         saving = true;
         error = "";
         try {
-            state.setText(JSON.stringify(pendingDocument, null, 4) + "\n");
+            const serialized = JSON.stringify(pendingDocument, null, 4) + "\n";
+            // FileView skips identical writes and does not emit saved for them.
+            if (state.text() === serialized) saveCompleted();
+            else state.setText(serialized);
         } catch (failure) {
             saveFailed();
         }
@@ -91,6 +156,7 @@ Singleton {
         pendingOutput = "";
         saving = false;
         error = "Не удалось сохранить выбор. Проверь доступ к wallpapers.json и повтори Enter.";
+        LiveWallpapers.saveFailed();
     }
     function saveCompleted() {
         if (!saving || !pendingDocument) return;
@@ -105,6 +171,7 @@ Singleton {
             if (targetOutput === pendingOutput) targetOutput = "";
             pendingOutput = "";
         }
+        LiveWallpapers.saved();
     }
     Timer {
         interval: 10000

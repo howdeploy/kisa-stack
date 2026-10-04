@@ -2,6 +2,7 @@ import {
   COMPOSITOR, animationVariable, createAnimationController, cubicBezier,
   type AnimationController,
 } from "shoji_wm";
+import { driveAquariumWorkspaceWave } from "./aquarium";
 
 export const WORKSPACE_WAVE_DURATION = 940;
 export const WORKSPACE_WAVE_EASING = cubicBezier(0.22, 0.1, 0.36, 1);
@@ -19,9 +20,12 @@ const waves = new Map<string, Wave>();
 function publish(output: string): void {
   const wave = waves.get(output);
   if (!wave) return;
+  const id = `${SESSION}-${wave.generation}`;
+  const progress = wave.animation.variable(PROGRESS).peek();
+  driveAquariumWorkspaceWave(output, id, progress, wave.direction);
   COMPOSITOR.workspace.transition(output, {
-    id: `${SESSION}-${wave.generation}`,
-    progress: wave.animation.variable(PROGRESS).peek(),
+    id,
+    progress,
     direction: wave.direction,
     accent: [203 / 255, 166 / 255, 247 / 255],
   });

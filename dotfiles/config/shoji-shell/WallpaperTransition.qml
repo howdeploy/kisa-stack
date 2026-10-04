@@ -1,10 +1,14 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Quickshell
 
 Item {
     id: root
     required property string outputName
     readonly property string requestedSource: Wallpapers.current(outputName)
+    readonly property var requestedFrame: Wallpapers.frameFor(outputName)
+    readonly property var output: Quickshell.screens.find(s => s.name === outputName)
+    readonly property vector4d outputRect: Qt.vector4d(output ? output.x : 0, output ? output.y : 0, width, height)
     property bool initialized: false
     property bool hasWallpaper: false
     property bool firstIsFront: true
@@ -18,10 +22,20 @@ Item {
     readonly property var front: firstIsFront ? first : second
     readonly property var back: firstIsFront ? second : first
 
+    function syncCovered() {
+        if (!LiveWallpapers.covered) return;
+        displayedLayoutId = Wallpapers.layoutId;
+        transitionLayoutId = Wallpapers.layoutId;
+        loadRequested();
+    }
+
     function loadRequested() {
         if (!initialized || !Wallpapers.ready || transitioning || preparing) return;
+        if (LiveWallpapers.busy && !LiveWallpapers.covered) return;
         if (hasWallpaper && front.source.toString() === requestedSource
+                && JSON.stringify(front.framing) === JSON.stringify(requestedFrame)
                 && displayedLayoutId === Wallpapers.layoutId) return;
+        back.framing = requestedFrame;
         back.source = requestedSource;
         maybeStart();
     }
@@ -30,7 +44,7 @@ Item {
                 || back.source.toString() !== requestedSource) return;
         if (Wallpapers.targetOutput === outputName) return;
         transitionLayoutId = Wallpapers.layoutId;
-        if (!hasWallpaper || front.status !== Image.Ready || wave.status === ShaderEffect.Error) {
+        if (LiveWallpapers.covered || !hasWallpaper || front.status !== Image.Ready || wave.status === ShaderEffect.Error) {
             finish();
             return;
         }
@@ -71,6 +85,7 @@ Item {
     }
     // Wallpaper and layout are committed together; start after both have changed.
     onRequestedSourceChanged: Qt.callLater(loadRequested)
+    onRequestedFrameChanged: Qt.callLater(loadRequested)
     Component.onCompleted: { initialized = true; loadRequested(); }
     Connections {
         target: Wallpapers
@@ -78,27 +93,29 @@ Item {
         function onLayoutIdChanged(): void { Qt.callLater(root.loadRequested); }
         function onTargetOutputChanged(): void { root.maybeStart(); }
     }
-    Image {
+    Connections {
+        target: LiveWallpapers
+        function onBusyChanged() { if (!LiveWallpapers.busy) root.loadRequested(); }
+    }
+    WallpaperImage {
         id: first
         anchors.fill: parent
         source: Wallpapers.fallback
-        sourceSize: Qt.size(root.width, root.height)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: false
+        outputRect: root.outputRect
+        pixelRatio: root.output ? root.output.devicePixelRatio : 1
+        capture: root.preparing || root.transitioning
         visible: root.firstIsFront && !root.transitioning
         onStatusChanged: {
             if (status === Image.Error) console.warn("Wallpaper image could not be loaded:", source);
             root.maybeStart();
         }
     }
-    Image {
+    WallpaperImage {
         id: second
         anchors.fill: parent
-        sourceSize: Qt.size(root.width, root.height)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: false
+        outputRect: root.outputRect
+        pixelRatio: root.output ? root.output.devicePixelRatio : 1
+        capture: root.preparing || root.transitioning
         visible: !root.firstIsFront && !root.transitioning
         onStatusChanged: {
             if (status === Image.Error) console.warn("Wallpaper image could not be loaded:", source);
@@ -110,10 +127,10 @@ Item {
         anchors.fill: parent
         visible: root.transitioning
         blending: false
-        property var oldImage: root.front
-        property var newImage: root.back
-        property size oldSize: Qt.size(Math.max(1, root.front.implicitWidth), Math.max(1, root.front.implicitHeight))
-        property size newSize: Qt.size(Math.max(1, root.back.implicitWidth), Math.max(1, root.back.implicitHeight))
+        property var oldImage: root.front.texture
+        property var newImage: root.back.texture
+        property size oldSize: Qt.size(width, height)
+        property size newSize: Qt.size(width, height)
         property size viewportSize: Qt.size(width, height)
         property real progress: root.progress
         property color accent: Theme.accent

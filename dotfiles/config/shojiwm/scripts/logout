@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Request ShojiWM's native shutdown; --check only checks availability."""
+import os
+from pathlib import Path
+import socket
+import struct
+import sys
+
+
+def main():
+    if sys.argv[1:] not in ([], ["--check"]):
+        raise ValueError("Использование: logout [--check]")
+    display = os.environ.get("WAYLAND_DISPLAY")
+    if not display:
+        raise ValueError("Не найдена текущая Wayland-сессия")
+    address = Path(display)
+    if not address.is_absolute():
+        address = Path(os.environ["XDG_RUNTIME_DIR"]) / address
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as wayland:
+        wayland.settimeout(1)
+        wayland.connect(str(address))
+        pid, uid, _ = struct.unpack("3i", wayland.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+        if uid != os.geteuid() or pid <= 0:
+            raise ValueError("Wayland-сессия принадлежит другому пользователю")
+        executable = os.readlink(f"/proc/{pid}/exe").removesuffix(" (deleted)")
+        if Path(executable).name != "shoji_wm":
+            raise ValueError("Текущая сессия не является ShojiWM")
+        name = f"shojiwm-logout-{pid}"
+        available = any(line.split()[-1:] == ["@" + name]
+                        for line in Path("/proc/net/unix").read_text().splitlines())
+        if not available:
+            raise ValueError("Запущена старая версия ShojiWM. Первый выход: Super+Shift+Q. "
+                             "После повторного входа кнопка заработает.")
+        if sys.argv[1:] == ["--check"]:
+            print("Штатный выход ShojiWM доступен; сессия не завершалась.")
+            return
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
+            control.settimeout(1)
+            control.connect("\0" + name)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        print(f"Выход не выполнен: {error}", file=sys.stderr)
+        sys.exit(1)

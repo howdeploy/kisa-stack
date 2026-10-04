@@ -6,8 +6,8 @@ This directory contains the configuration sources, installation tools and a map
 of how the parts fit together. It is a sanitized source distribution, not a disk
 image or a backup of the author's home directory.
 
-**Use the [howdeploy/ShojiWM fork](https://github.com/howdeploy/ShojiWM/tree/howdeploy/stack),
-branch `howdeploy/stack`, at the revision in [sources.json](sources.json).** The
+**Use the [howdeploy/ShojiWM fork](https://github.com/howdeploy/ShojiWM/tree/howdeploy/desktop-20261004),
+branch `howdeploy/desktop-20261004`, at the revision in [sources.json](sources.json).** The
 configuration depends on fixes and APIs contributed by howdeploy. Fork `main`
 does not include them. See [fork and PR provenance](docs/fork.md).
 
@@ -24,9 +24,14 @@ does not include them. See [fork and PR provenance](docs/fork.md).
    and [AGENTS.md](AGENTS.md).
 
 The first launch uses the **empty** preset and a bundled neutral SVG background.
-`Super+W` opens the wallpaper/preset picker. The other two presets preserve the
-original arrangements and widget sets; integrations stay absent until enabled.
+`Super+W` opens the wallpaper/preset picker. The original arrangements remain,
+joined by Home Zone and Gaming Home Zone; integrations stay absent until enabled.
 The UI currently retains the original Russian labels. Documentation is in English.
+
+The [October update](docs/update-2026-10-04.md) adds live wallpaper transitions,
+screen shader selection, snow/aquarium effects, clock mascots and MateEngine IPC.
+It preserves the working desktop's source while replacing personal paths and
+defaults. The sanitized update has not had a new build or graphical check.
 
 ## Categories
 

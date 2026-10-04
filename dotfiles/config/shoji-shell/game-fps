@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Steam launch wrapper and local MangoHud telemetry for Gaming Home Zone."""
+
+import functools
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+
+def session_root():
+    runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return Path(runtime) / "shoji-shell" / "game-fps"
+
+
+def process_identity(pid):
+    try:
+        # starttime distinguishes a live launch from a later reuse of its PID.
+        stat = Path(f"/proc/{int(pid)}/stat").read_text()
+        return stat[stat.rfind(")") + 2:].split()[19]
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def launch(command):
+    mangohud = shutil.which("mangohud")
+    if not mangohud:
+        print("Gaming Home Zone: MangoHud is not installed; starting without FPS telemetry.",
+              file=sys.stderr)
+        os.execvpe(command[0], command, os.environ)
+
+    root = session_root()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    session = Path(tempfile.mkdtemp(prefix="game-", dir=root))
+    try:
+        app_id = os.environ.get("SteamAppId") or os.environ.get("SteamGameId", "")
+        if not app_id.isdecimal() or not 0 < int(app_id) < 2**32:
+            app_id = ""
+        metadata = {"appId": app_id, "pid": os.getpid(),
+                    "identity": process_identity(os.getpid()), "started": time.time()}
+        (session / "session.json").write_text(json.dumps(metadata))
+        config = session / "MangoHud.conf"
+        # no_display can suppress autostart logging. Keep rendering transparent instead.
+        config.write_text("\n".join([
+            "no_display=0", "alpha=0", "background_alpha=0", "fps=1",
+            "autostart_log=1", "log_interval=500", "log_duration=0",
+            "permit_upload=0", f"output_folder={session}", "",
+        ]))
+        env = os.environ.copy()
+        env.pop("MANGOHUD_CONFIG", None)
+        env["MANGOHUD_CONFIGFILE"] = str(config)
+        # Proton's container must see the config and write logs in the same directory.
+        shared = env.get("PRESSURE_VESSEL_FILESYSTEMS_RW", "")
+        env["PRESSURE_VESSEL_FILESYSTEMS_RW"] = ":".join(filter(None, [shared, str(session)]))
+        child = subprocess.Popen([mangohud, *command], env=env)
+
+        def forward(signum, _frame):
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, forward)
+        result = child.wait()
+        return result if result >= 0 else 128 - result
+    finally:
+        # Only this launch's temporary telemetry is removed, never Steam/game files.
+        shutil.rmtree(session, ignore_errors=True)
+
+
+@functools.lru_cache(maxsize=32)
+def game_details(app_id):
+    if not app_id:
+        return {"name": "Steam", "art": "", "artKind": ""}
+    steam = Path.home() / ".local/share/Steam"
+    libraries = {steam}
+    try:
+        vdf = (steam / "steamapps/libraryfolders.vdf").read_text(errors="replace")
+        for path in re.findall(r'"path"\s+"((?:\\.|[^"\\])*)"', vdf):
+            libraries.add(Path(path.replace("\\\\", "\\").replace('\\"', '"')))
+    except OSError:
+        pass
+    name = f"Steam · {app_id}"
+    for library in libraries:
+        try:
+            manifest = (library / f"steamapps/appmanifest_{app_id}.acf").read_text(errors="replace")
+            match = re.search(r'"name"\s+"((?:\\.|[^"\\])*)"', manifest)
+            if match:
+                name = match.group(1).replace('\\"', '"').replace("\\\\", "\\")
+                break
+        except OSError:
+            continue
+    art_root = steam / "appcache/librarycache" / app_id
+    for filename in ("header.jpg", "library_header.jpg", "library_hero.jpg", "logo.png"):
+        candidates = [art_root / filename, *sorted(art_root.glob(f"*/{filename}"))]
+        for candidate in candidates:
+            if candidate.is_file():
+                return {"name": name, "art": candidate.as_uri(),
+                        "artKind": "logo" if filename == "logo.png" else "cover"}
+    return {"name": name, "art": "", "artKind": ""}
+
+
+def read_fps(session):
+    logs = []
+    for path in session.glob("*.csv"):
+        if path.name.endswith("_summary.csv"):
+            continue
+        try:
+            modified = path.stat().st_mtime
+            if time.time() - modified < 3:
+                logs.append((modified, path))
+        except OSError:
+            continue
+    for _modified, path in sorted(logs, reverse=True):
+        try:
+            with path.open("rb") as log:
+                header = log.read(8192).decode("utf-8", errors="replace")
+                if not any(line.startswith("fps,frametime,") for line in header.splitlines()):
+                    continue
+                end = log.seek(0, os.SEEK_END)
+                log.seek(max(0, end - 8192))
+                # Ignore the possibly incomplete last row and the partial first row.
+                rows = log.read().decode("utf-8", errors="replace").split("\n")[1:-1]
+            for row in reversed(rows):
+                fields = row.split(",")
+                if len(fields) < 16:
+                    continue
+                try:
+                    fps = float(fields[0])
+                except ValueError:
+                    continue
+                if math.isfinite(fps) and fps >= 0:
+                    return fps
+        except OSError:
+            continue
+    return None
+
+
+def current_game():
+    sessions = []
+    for path in session_root().glob("game-*/session.json"):
+        try:
+            metadata = json.loads(path.read_text())
+            identity = process_identity(metadata["pid"])
+            if identity is not None and identity == metadata["identity"]:
+                sessions.append((float(metadata["started"]), path.parent, metadata))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if not sessions:
+        return {}
+    # If two games are open, use the most recently launched instrumented game.
+    _started, session, metadata = max(sessions, key=lambda entry: entry[0])
+    app_id = metadata["appId"]
+    return {"appId": app_id, **game_details(app_id), "fps": read_fps(session)}
+
+
+def watch():
+    try:
+        while True:
+            print(json.dumps(current_game(), ensure_ascii=False), flush=True)
+            time.sleep(1)
+    except (BrokenPipeError, KeyboardInterrupt):
+        return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--watch"]:
+        sys.exit(watch())
+    if len(sys.argv) < 2:
+        print("Steam launch option: $XDG_CONFIG_HOME/shoji-shell/game-fps %command%", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(launch(sys.argv[1:]))

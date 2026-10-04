@@ -134,7 +134,7 @@ def collect():
 
 
 def self_check():
-    session_id = "00000000-0000-4000-8000-000000000001"
+    session_id = "01a0e407-de90-7d61-af9c-1d49a0a4008c"
     cwd = "/tmp/проект ' $(echo unsafe)"
     for provider, command in COMMANDS.items():
         identifier = "session_" + session_id if provider == "kimi" else session_id
@@ -155,7 +155,7 @@ def self_check():
         assert recent(values, {session_id}) == []
         set_archived("codex", session_id, False, archive)
         assert read_archive(archive) == {("grok", session_id)}
-        other = dict(values[0], id="00000000-0000-4000-8000-000000000002")
+        other = dict(values[0], id="01a0e407-de90-7d61-af9c-1d49a0a4008d")
         assert recent([*values, other], {session_id}) == [other]
     print("Session command quoting and recency: OK")
 

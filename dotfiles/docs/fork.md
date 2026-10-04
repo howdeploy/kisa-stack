@@ -1,5 +1,22 @@
 # Fork and contribution provenance
 
+## Current desktop snapshot (2026-10-04)
+
+Use `howdeploy/desktop-20261004` at
+[`2c767129e5a900310b4d53df9f5952a30f6b5953`](https://github.com/howdeploy/ShojiWM/commit/2c767129e5a900310b4d53df9f5952a30f6b5953).
+This snapshot preserves the installed compositor source, including generic
+output overlays, reload/cache fixes, same-user logout and MateEngine policies.
+Read its [snapshot notes](https://github.com/howdeploy/ShojiWM/blob/2c767129e5a900310b4d53df9f5952a30f6b5953/DESKTOP-SNAPSHOT.md)
+for the distinction between generic fixes and local pet/dock rules.
+
+The generic shaped-window input fix is submitted separately in
+[PR #122](https://github.com/bea4dev/ShojiWM/pull/122), on upstream main at
+`9f99d8b`. That rebased PR has not been compiled or checked in a live session.
+The desktop snapshot has not received a new build during publication either;
+it retains the source of the previously installed local build.
+
+## Earlier September snapshot
+
 The compositor is [howdeploy/ShojiWM](https://github.com/howdeploy/ShojiWM), an
 integration of upstream ShojiWM and five contributions by howdeploy. These
 dotfiles are a separate user configuration layer; the fork itself ships the

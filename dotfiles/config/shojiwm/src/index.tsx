@@ -29,13 +29,16 @@ import type { CompositionRenderable, ManagedWindowRect } from "shoji_wm/types";
 import { createIpcServer } from "shoji_wm/ipc";
 import {
   HybridWindowManager,
-  isFloatingUtilityWindow,
+  isMateEngineWindow,
+  isPictureInPictureWindow,
+  isSteamNotificationWindow,
   PERSISTENT_WORKSPACE_COUNT,
   TITLEBAR_HEIGHT,
   WINDOW_BORDER_PX,
   WINDOW_STATE_FULLSCREEN,
   WINDOW_STATE_FULLSCREEN_WITH_CHROME,
   WINDOW_STATE_MINIMIZED,
+  WINDOW_STATE_PINNED,
   WINDOW_STATE_MINIMIZE_VISUAL_IDLE,
   WINDOW_STATE_TILE_DRAGGING,
   WINDOW_STATE_TILE_REORDERING,
@@ -54,14 +57,20 @@ import { dragJellyEffect } from "./effect/window-drag-jelly";
 import { monitorPortalEffect, stopMonitorPortals } from "./effect/monitor-portal";
 import { layoutMeltEffect, stopLayoutMelts } from "./effect/layout-melt";
 import { stopWorkspaceWaves } from "./effect/workspace-wave";
+import { wallpaperWaveEffect, setWallpaperWave, stopWallpaperWave } from "./effect/live-wallpaper-wave";
+import { snowEffect, startSnow, stopSnow } from "./effect/snow";
+import { registerScreenShaderIpc, screenShaderPickerMapped, screenShaderPickerClosed, stopRetroScreen } from "./effect/retro-screen";
+import { aquariumMistEffect } from "./effect/aquarium";
+import { petKeepsDockVisible, registerMateEngineIpc } from "./mateengine";
 
 const home = COMPOSITOR.env.get("HOME")!;
 const configHome = COMPOSITOR.env.get("XDG_CONFIG_HOME") || `${home}/.config`;
 const scripts = `${configHome}/shojiwm/scripts`;
 
-COMPOSITOR.effect.window = (window) => windowWaveEffect(window)
-  ?? dragJellyEffect(window)
-  ?? windowJellyEffect(window);
+COMPOSITOR.effect.window = (window) => isMateEngineWindow(window) ? null
+  : windowWaveEffect(window)
+    ?? dragJellyEffect(window)
+    ?? windowJellyEffect(window);
 
 COMPOSITOR.env.apply({
   QT_QPA_PLATFORM: "wayland;xcb",
@@ -75,8 +84,12 @@ COMPOSITOR.cursor.configure({
   size: 24,
 });
 
-COMPOSITOR.window.decoration.configure((_window, context) => {
-  return { mode: context.clientPreference ?? "server" };
+COMPOSITOR.window.decoration.configure((window, context) => {
+  return {
+    mode: /^org\.telegram\.desktop(?:[._]|$)/i.test(window.appId() ?? "")
+      ? "client"
+      : context.clientPreference ?? "server",
+  };
 });
 
 const HYBRID_WINDOW_MANAGER = new HybridWindowManager(naturalRootRect);
@@ -87,10 +100,28 @@ const WINDOW_STACK_Z_INDEX_RANGE = 100_000_000;
 const FOCUSED_TILED_WINDOW_Z_INDEX = 1_000_000_000;
 const REORDERING_TILED_WINDOW_Z_INDEX = -2_000_000_000;
 
+// Shared by rendering and the pet's window/occlusion snapshot.
+function compositorWindowZIndex(window: WaylandWindow): number {
+  if (isMateEngineWindow(window)) return FULLSCREEN_Z_INDEX - 1;
+  const stack = HYBRID_WINDOW_MANAGER.getWindowZIndex(window)();
+  if (HYBRID_WINDOW_MANAGER.isWindowAboveFullscreen(window)) {
+    return FULLSCREEN_Z_INDEX + 1 + Math.max(0, Math.min(WINDOW_STACK_Z_INDEX_RANGE, stack));
+  }
+  if (window.state[WINDOW_STATE_FULLSCREEN]() || window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) return FULLSCREEN_Z_INDEX;
+  if (!window.state[WINDOW_STATE_WORKSPACE_TILED]()) return stack;
+  const offset = Math.max(-WINDOW_STACK_Z_INDEX_RANGE, Math.min(WINDOW_STACK_Z_INDEX_RANGE, stack));
+  if (!window.state[WINDOW_STATE_TILED]()) return FLOATING_WINDOW_Z_INDEX_BASE + offset;
+  if (window.state[WINDOW_STATE_TILE_REORDERING]()) return REORDERING_TILED_WINDOW_Z_INDEX;
+  return window.isFocused() ? FOCUSED_TILED_WINDOW_Z_INDEX : offset;
+}
+
 COMPOSITOR.onDisable((event) => {
+  stopSnow();
   stopLayoutMelts();
   stopMonitorPortals();
   stopWorkspaceWaves();
+  stopWallpaperWave();
+  stopRetroScreen();
   if (event.isReloading) {
     const snapshot = HYBRID_WINDOW_MANAGER.snapshot();
     event.persist(HOT_RELOAD_WINDOW_MANAGER_STATE, snapshot);
@@ -99,6 +130,7 @@ COMPOSITOR.onDisable((event) => {
 });
 
 COMPOSITOR.onEnable((event) => {
+  startSnow();
   if (event.isReloading) {
     const snapshot = event.restore<
       ReturnType<typeof HYBRID_WINDOW_MANAGER.snapshot>
@@ -120,6 +152,33 @@ COMPOSITOR.onEnable((event) => {
 //   dock.proximity           { monitor: string, inside: bool }    (broadcast)
 // ---------------------------------------------------------------------------
 const WORKSPACE_IPC = createIpcServer();
+registerScreenShaderIpc(WORKSPACE_IPC, (name) => {
+  const output = COMPOSITOR.output.current[name];
+  if (!output?.resolution || output.scale <= 0) return null;
+  const windows = HYBRID_WINDOW_MANAGER.listWindows().filter(window => {
+    if (window.state[WINDOW_STATE_MINIMIZED]() || !window.state[WINDOW_STATE_WORKSPACE_VISIBLE]()) return false;
+    const outputs = window.state[WINDOW_STATE_VISIBLE_OUTPUTS]();
+    return !outputs || outputs.includes(name);
+  });
+  return {
+    origin: [output.position.x, output.position.y],
+    extent: [output.resolution.width / output.scale, output.resolution.height / output.scale],
+    windows: windows.slice(0, 16).map(window => {
+      const rect = window.state[WINDOW_STATE_RECT]();
+      return [read(rect.x) - output.position.x,
+        read(rect.y) + window.state[WINDOW_STATE_WORKSPACE_OFFSET_Y]() - output.position.y,
+        read(rect.width), read(rect.height)];
+    }),
+  };
+});
+registerMateEngineIpc(WORKSPACE_IPC, HYBRID_WINDOW_MANAGER, compositorWindowZIndex);
+let keyboardLayout: { index: number; name: string } | null = null;
+WORKSPACE_IPC.handle("keyboard.get", () => keyboardLayout);
+// Optional until the compositor is restarted into the event-based API.
+COMPOSITOR.event.onKeyboardLayoutChange?.((layout) => {
+  keyboardLayout = { index: layout.index, name: layout.name };
+  WORKSPACE_IPC.broadcast("keyboard.changed", keyboardLayout);
+});
 let lastWorkspacesJson = "";
 let workspaceBroadcastQueued = false;
 
@@ -214,6 +273,15 @@ WORKSPACE_IPC.handle("windows.activate", (params) => {
   }
 });
 
+WORKSPACE_IPC.handle("wallpaper.outputs", () => ({
+  wallpaperWave: true,
+  wallpaperWaveVersion: 2,
+  outputs: COMPOSITOR.output.list.map(name => ({ name })),
+  layers: Object.values(COMPOSITOR.layer.current)
+    .filter(layer => layer.namespace === "linux-wallpaperengine"),
+}));
+WORKSPACE_IPC.handle("wallpaper.wave", params => { setWallpaperWave(params); return true; });
+
 // ---------------------------------------------------------------------------
 // Dock proximity: watch the pointer and broadcast enter/leave for the bottom
 // strip of each monitor. The bar uses this in place of a layer-shell trigger
@@ -240,6 +308,7 @@ WORKSPACE_IPC.handle("dock.get", (params) => {
     occluded: HYBRID_WINDOW_MANAGER.dockOccluded(request.monitor, request.width, request.height),
     nearby: dockProximityByMonitor.get(request.monitor) === true,
     chromeFullscreen: HYBRID_WINDOW_MANAGER.hasChromeFullscreen(request.monitor),
+    petSeated: petKeepsDockVisible(request.monitor, HYBRID_WINDOW_MANAGER),
   };
 });
 
@@ -333,12 +402,20 @@ COMPOSITOR.process.once("polkit-agent", {
 
 COMPOSITOR.process.service("dock", {
   command: ["bash", `${scripts}/start-shell`],
+  // ShojiWM owns restarts; Quickshell's crash relaunch would create a second shell.
+  env: { QS_DISABLE_CRASH_HANDLER: "1" },
   restart: "on-failure",
 });
 
 COMPOSITOR.key.bind("screenshot-region", "Super+Shift+S", () => {
   COMPOSITOR.process.spawn({
     command: [`${scripts}/screenshot-region`],
+  });
+});
+
+COMPOSITOR.key.bind("screenshot-all", "Super+Shift+A", () => {
+  COMPOSITOR.process.spawn({
+    command: [`${scripts}/screenshot-all`],
   });
 });
 
@@ -372,6 +449,12 @@ COMPOSITOR.key.bind("wallpaper-picker", "Super+W", () => {
     "call", "wallpaper", "toggle", HYBRID_WINDOW_MANAGER.getCurrentMonitorName(),
   ] });
 });
+COMPOSITOR.key.bind("shader-picker", "Super+Shift+W", () => {
+  COMPOSITOR.process.spawn({ command: [
+    "quickshell", "ipc", "--path", `${configHome}/shoji-shell`,
+    "call", "screen-shaders", "toggle", HYBRID_WINDOW_MANAGER.getCurrentMonitorName(),
+  ] });
+});
 COMPOSITOR.key.bind("toggle-tiling-mode", "Super+S", () => {
   HYBRID_WINDOW_MANAGER.toggleCurrentWorkspaceTiling();
   scheduleWorkspaceBroadcast();
@@ -382,8 +465,14 @@ COMPOSITOR.key.bind("close-focused-window", "Super+Q", () => {
 COMPOSITOR.key.bind("toggle-focused-window-maximize", "Super+M", () => {
   HYBRID_WINDOW_MANAGER.toggleFocusedWindowMaximize();
 });
+COMPOSITOR.key.bind("toggle-focused-window-pin", "Super+P", () => {
+  HYBRID_WINDOW_MANAGER.toggleFocusedWindowPin();
+});
 COMPOSITOR.key.bind("toggle-focused-window-fullscreen", "Super+F", () => {
   HYBRID_WINDOW_MANAGER.toggleFocusedWindowFullscreen();
+});
+COMPOSITOR.key.bind("toggle-focused-window-fullscreen-all-outputs", "Super+Shift+F", () => {
+  HYBRID_WINDOW_MANAGER.toggleFocusedWindowFullscreen(true);
 });
 COMPOSITOR.key.bind("tile-focus-left-quick", "Super+Left", () => {
   HYBRID_WINDOW_MANAGER.focusTile(-1);
@@ -433,7 +522,7 @@ for (let index = 1; index <= PERSISTENT_WORKSPACE_COUNT; index++) {
 }
 
 let fpsCounter = false;
-COMPOSITOR.key.bind("fps", "Super+Shift+F", () => {
+COMPOSITOR.key.bind("fps", "Super+Ctrl+Shift+F", () => {
   fpsCounter = !fpsCounter;
   COMPOSITOR.debug.fpsCounter = fpsCounter;
 });
@@ -528,6 +617,12 @@ const LAYER_BLUR_MASK = compileLayerEffect({
 
 COMPOSITOR.effect.layer = (layer) => {
   const namespace = layer.namespace();
+  if (namespace === "shoji-aquarium-mist")
+    return { behind: aquariumMistEffect(layer) };
+  if (namespace === "shoji-snow-near")
+    return { inFront: snowEffect(layer) };
+  if (namespace === "shoji-wallpaper-wave")
+    return { behind: wallpaperWaveEffect(layer), inFront: snowEffect(layer) };
   // Both the LiquidIsland experiment and shoji-bar-3 draw only a translucent
   // silhouette and let the compositor recover the shape from its alpha.
   if (namespace === "liquid-island-qs" || namespace === "shoji-bar-3") {
@@ -548,7 +643,9 @@ COMPOSITOR.effect.layer = (layer) => {
     });
     return { ...transition, inFront: monitorPortalEffect(layer) };
   }
-  if (namespace === "shoji-shell" || namespace === "no_blur" || namespace === "shoji-water") {
+  if (namespace === "shoji-shell" || namespace === "shoji-dock" || namespace === "shoji-shader-picker"
+      || namespace === "no_blur" || namespace === "shoji-water"
+      || namespace === "linux-wallpaperengine") {
     return {};
   }
 
@@ -581,6 +678,11 @@ const POPUP_BLUR = compilePopupEffect({
 
 COMPOSITOR.effect.popup = (popup) => {
   if (popup.parentKind === "window") {
+    return {};
+  }
+  // Shell popups draw their own opaque background, just like the root layer.
+  const parentNamespace = COMPOSITOR.layer.current[popup.parentId]?.namespace;
+  if (parentNamespace === "shoji-shell" || parentNamespace === "shoji-dock") {
     return {};
   }
 
@@ -681,11 +783,13 @@ COMPOSITOR.event.onGestureSwipe((event) => {
 });
 
 COMPOSITOR.event.onOutputChange((event) => {
+  stopRetroScreen();
   HYBRID_WINDOW_MANAGER.onOutputChange(event);
   scheduleWorkspaceBroadcast();
 });
 
-COMPOSITOR.event.onCreateLayer(() => {
+COMPOSITOR.event.onCreateLayer((layer) => {
+  screenShaderPickerMapped(layer);
   HYBRID_WINDOW_MANAGER.refreshUsableAreaLayouts();
 });
 
@@ -693,7 +797,8 @@ COMPOSITOR.event.onUpdateLayer(() => {
   HYBRID_WINDOW_MANAGER.refreshUsableAreaLayouts();
 });
 
-COMPOSITOR.event.onDestroyLayer(() => {
+COMPOSITOR.event.onDestroyLayer((layer) => {
+  screenShaderPickerClosed(layer);
   HYBRID_WINDOW_MANAGER.refreshUsableAreaLayouts();
 });
 
@@ -735,6 +840,8 @@ function usesClientDecoration(window: WaylandWindow): boolean {
 
 function naturalRootRect(window: WaylandWindow): ManagedWindowRect {
   const client = window.position;
+  if (isPictureInPictureWindow(window) || isSteamNotificationWindow(window)
+    || isMateEngineWindow(window)) return { ...client };
   const titlebarHeight = usesClientDecoration(window) ? 0 : TITLEBAR_HEIGHT;
   return {
     x: client.x - WINDOW_BORDER_PX,
@@ -760,37 +867,13 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
     };
   });
   const forceRectSize = computed(
-    () => window.isResizable() && !window.isTransient(),
+    () => window.isResizable() && !window.isTransient() && !isPictureInPictureWindow(window),
   );
 
   // force no corner rounding CSD
-  const tiled = true;
+  const tiled = computed(() => !isPictureInPictureWindow(window));
 
-  const stackZIndex = HYBRID_WINDOW_MANAGER.getWindowZIndex(window);
-  const zIndex = computed(() => {
-    // Capture and audio controls stay above normal and fullscreen clients.
-    if (isFloatingUtilityWindow(window)) {
-      return FULLSCREEN_Z_INDEX + 1
-        + Math.max(0, Math.min(WINDOW_STACK_Z_INDEX_RANGE, stackZIndex()));
-    }
-    if (window.state[WINDOW_STATE_FULLSCREEN]() || window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) return FULLSCREEN_Z_INDEX;
-    if (!window.state[WINDOW_STATE_WORKSPACE_TILED]()) {
-      return stackZIndex();
-    }
-    const stackOffset = Math.max(
-      -WINDOW_STACK_Z_INDEX_RANGE,
-      Math.min(WINDOW_STACK_Z_INDEX_RANGE, stackZIndex()),
-    );
-    if (!window.state[WINDOW_STATE_TILED]()) {
-      return FLOATING_WINDOW_Z_INDEX_BASE + stackOffset;
-    }
-    if (window.state[WINDOW_STATE_TILE_REORDERING]()) {
-      return REORDERING_TILED_WINDOW_Z_INDEX;
-    }
-    return window.isFocused()
-      ? FOCUSED_TILED_WINDOW_Z_INDEX
-      : stackOffset;
-  });
+  const zIndex = computed(() => compositorWindowZIndex(window));
   const minimizeVisualIdle = window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE];
   const inactive = computed(
     () => (minimizeVisualIdle() && !windowWaveIsHiding(window))
@@ -799,6 +882,26 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
   const interactive = computed(
     () => !window.state[WINDOW_STATE_MINIMIZED]() && !inactive(),
   );
+
+  // MateEngine: bare client in its own movable rect (no chrome), above other
+  // windows and below fullscreen clients. Clicks pass through via the client
+  // input region.
+  if (isMateEngineWindow(window)) {
+    return (
+      <ManagedWindow
+        rect={managedRect}
+        zIndex={FULLSCREEN_Z_INDEX - 1}
+        visibleOutputs={window.state[WINDOW_STATE_VISIBLE_OUTPUTS]}
+        opacity={workspaceOpacity}
+        forceRectSize={true}
+        tiled={true}
+        idle={inactive}
+        interactive={interactive}
+      >
+        <ClientWindow />
+      </ManagedWindow>
+    );
+  }
 
   const borderColor = window.isFocused((focused) =>
     focused ? "#cba6f7" : "#585b70",
@@ -853,6 +956,7 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
       }}
     />
   );
+  const pinButton = <PinButton window={window} />;
   const minimizeButton = <MinimizeButton window={window} />;
   const maximizeButton = <MaximizeButton window={window} />;
   const closeButton = <CloseButton window={window} />;
@@ -862,6 +966,7 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
       <Box direction="row" style={titlebarStyle}>
         {appIcon}
         {label}
+        {pinButton}
         {minimizeButton}
         {maximizeButton}
         {closeButton}
@@ -878,12 +983,31 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
         <Box direction="row" style={titlebarStyle}>
           {appIcon}
           {label}
+          {pinButton}
           {minimizeButton}
           {maximizeButton}
           {closeButton}
         </Box>
         <ClientWindow />
       </ShaderEffect>
+    );
+  }
+
+  // PiP and Steam notifications draw their own chrome at the client's size.
+  if (isPictureInPictureWindow(window) || isSteamNotificationWindow(window)) {
+    return (
+      <ManagedWindow
+        rect={managedRect}
+        zIndex={zIndex}
+        visibleOutputs={window.state[WINDOW_STATE_VISIBLE_OUTPUTS]}
+        opacity={workspaceOpacity}
+        forceRectSize={false}
+        tiled={false}
+        idle={inactive}
+        interactive={interactive}
+      >
+        <ClientWindow />
+      </ManagedWindow>
     );
   }
 
@@ -980,6 +1104,31 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
         <Box direction="row">{innerComponents}</Box>
       </WindowBorder>
     </ManagedWindow>
+  );
+};
+
+const PinButton = ({ window }: { window: WaylandWindow }) => {
+  const [hover, setHover] = useState(false);
+  const pinned = window.state[WINDOW_STATE_PINNED];
+  return (
+    <Box style={{ position: "relative", flexShrink: 0 }}>
+      <Button
+        id="pin-window"
+        onHoverChange={setHover}
+        onClick={() => HYBRID_WINDOW_MANAGER.toggleWindowPin(window)}
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          background: computed(() => pinned() ? "#cba6f760" : hover() ? "#cdd6f440" : "#cdd6f420"),
+          border: { px: 1, color: pinned(value => value ? "#cba6f7" : "#cba6f730") },
+        }}
+      />
+      <Image
+        src="./assets/pin.svg"
+        style={{ width: 12, height: 12, position: "absolute", top: 2, left: 2, zIndex: 1, pointerEvents: "none" }}
+      />
+    </Box>
   );
 };
 

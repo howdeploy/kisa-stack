@@ -19,10 +19,17 @@ Scope {
         ? WidgetLayouts.enabledOn("hermes", output, transition.transitionLayoutId) : beforeVisible
     readonly property bool relocating: !!transition && (transition.preparing || transition.transitioning)
         && WidgetLayouts.changesPlacement("hermes", output, transition.displayedLayoutId, transition.transitionLayoutId)
-    readonly property var wavePlacement: transition
+    readonly property var nextPlacement: transition
         ? WidgetLayouts.placement("hermes", beforeVisible && !(transition.transitioning && relocating)
             ? transition.displayedLayoutId : transition.transitionLayoutId)
         : placement
+    property var frozenPlacement: null
+    readonly property var wavePlacement: LiveWallpapers.busy && !LiveWallpapers.revealing && frozenPlacement
+        ? frozenPlacement : nextPlacement
+    Connections {
+        target: LiveWallpapers
+        function onCaptureWidgets() { root.frozenPlacement = root.nextPlacement; }
+    }
     property var placement: ({ horizontal: "center", vertical: "top", x: 0, y: 68 })
     readonly property bool opensUp: wavePlacement.vertical === "bottom"
     property bool shown: true
@@ -284,7 +291,8 @@ Scope {
 
     PanelWindow {
         screen: root.output
-        visible: root.shown && root.relocating && !!root.transition && root.transition.transitioning && !!outgoing.snapshot
+        visible: root.shown && !!outgoing.snapshot && (LiveWallpapers.busy ? LiveWallpapers.covered
+            : root.relocating && !!root.transition && root.transition.transitioning)
         anchors { top: true; left: true }
         margins.left: outgoing.frozenOrigin.x
         margins.top: outgoing.frozenOrigin.y
@@ -301,6 +309,7 @@ Scope {
             anchors.fill: parent
             transition: root.transition
             sourceItem: panelContent
+            captureEnabled: root.shown && root.beforeVisible
             moving: root.relocating && root.shown
             viewportSize: Qt.size(root.output ? root.output.width : 1, root.output ? root.output.height : 1)
             captureOrigin: Qt.vector2d(
@@ -334,18 +343,19 @@ Scope {
             id: panelContent
             anchors.fill: parent
             clip: true
-            enabled: !(root.transition && root.transition.preparing) && !layer.enabled
-            layer.enabled: !!root.transition && root.transition.transitioning
-                && (root.beforeVisible !== root.afterVisible || root.relocating)
+            enabled: !LiveWallpapers.busy && !(root.transition && (root.transition.preparing || (root.transition.transitioning
+                && (root.beforeVisible !== root.afterVisible || root.relocating))))
+            layer.enabled: LiveWallpapers.busy || (!!root.transition && root.transition.transitioning)
             layer.effect: WidgetWaveMask {
-                viewportSize: Qt.size(root.output ? root.output.width : 1, root.output ? root.output.height : 1)
-                widgetOrigin: Qt.vector2d(
-                    WidgetLayouts.horizontalPosition(root.wavePlacement, viewportSize.width, panel.width),
-                    WidgetLayouts.verticalPosition(root.wavePlacement, viewportSize.height, panel.height))
+                transitionContext: root.transition
+                screenSize: Qt.size(root.output ? root.output.width : 1, root.output ? root.output.height : 1)
+                localOrigin: Qt.vector2d(
+                    WidgetLayouts.horizontalPosition(root.wavePlacement, screenSize.width, panel.width),
+                    WidgetLayouts.verticalPosition(root.wavePlacement, screenSize.height, panel.height))
                 widgetSize: Qt.size(panelContent.width, panelContent.height)
-                progress: root.transition ? root.transition.progress : 1
-                beforeVisible: root.beforeVisible && !root.relocating ? 1 : 0
-                afterVisible: root.afterVisible ? 1 : 0
+                localProgress: root.transition ? root.transition.progress : 1
+                localBefore: root.beforeVisible && !root.relocating ? 1 : 0
+                localAfter: root.afterVisible ? 1 : 0
             }
             WidgetSurface { anchors.fill: parent }
             Item {

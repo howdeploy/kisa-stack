@@ -21,10 +21,16 @@ ConnectionTile 1.0 ConnectionTile.qml
 StatCard 1.0 StatCard.qml
 Brightness 1.0 Brightness.qml
 singleton Wallpapers 1.0 Wallpapers.qml
+singleton LiveWallpapers 1.0 LiveWallpapers.qml
+LiveWallpaperWave 1.0 LiveWallpaperWave.qml
 singleton WidgetLayouts 1.0 WidgetLayouts.qml
 WallpaperScreen 1.0 WallpaperScreen.qml
+SnowLayer 1.0 SnowLayer.qml
 WallpaperPicker 1.0 WallpaperPicker.qml
+singleton ScreenShaders 1.0 ScreenShaders.qml
+ShaderPicker 1.0 ShaderPicker.qml
 WallpaperTransition 1.0 WallpaperTransition.qml
+WallpaperImage 1.0 WallpaperImage.qml
 WidgetWaveLoader 1.0 WidgetWaveLoader.qml
 WidgetWaveMask 1.0 WidgetWaveMask.qml
 WidgetWaveSnapshot 1.0 WidgetWaveSnapshot.qml
@@ -38,3 +44,16 @@ WidgetSurface 1.0 WidgetSurface.qml
 GithubWidget 1.0 GithubWidget.qml
 NekoWidget 1.0 NekoWidget.qml
 SessionResumeWidget 1.0 SessionResumeWidget.qml
+ProfileWidget 1.0 ProfileWidget.qml
+HomeZone 1.0 HomeZone.qml
+HomeClock 1.0 HomeClock.qml
+HomeMascot 1.0 HomeMascot.qml
+HomeCalendar 1.0 HomeCalendar.qml
+HomeStat 1.0 HomeStat.qml
+HomeDisks 1.0 HomeDisks.qml
+HomeSystemCard 1.0 HomeSystemCard.qml
+HomeAccounts 1.0 HomeAccounts.qml
+HomeZonePreview 1.0 HomeZonePreview.qml
+GamingHomeZone 1.0 GamingHomeZone.qml
+GamingHomeZonePreview 1.0 GamingHomeZonePreview.qml
+GamingProcessList 1.0 GamingProcessList.qml

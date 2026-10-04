@@ -1,5 +1,21 @@
 # Validation record
 
+## 2026-10-04 source update
+
+Selected live desktop source was exported into the publication tree. The privacy
+guard was run on that tree; personal paths, profile links/tags, application pins,
+private music catalogs and saved wallpaper choices were excluded. Generated clock
+sprite sheets have an explicit file allowlist. Account collectors retain their
+opt-in gates, including inside Home Zone. No new build, lint, typecheck, installer
+test or graphical test was run for this update. The earlier checks below apply
+to the September snapshot, not automatically to the new source.
+
+The compositor snapshot is pinned separately in `sources.json`. Its provenance
+is the installed local desktop; publishing it does not establish clean-machine
+or cross-GPU compatibility.
+
+## 2026-09-28 packaging checks
+
 Packaging checks performed on 2026-09-28, with permission, without changing the
 running desktop or invoking account integrations:
 

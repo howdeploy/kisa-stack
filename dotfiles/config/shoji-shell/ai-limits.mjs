@@ -16,6 +16,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -97,6 +98,11 @@ function normalize(provider, raw) {
         .sort((a, b) => a.minutes - b.minutes).slice(0, 12);
 }
 
+function resetCredits(raw) {
+    const count = number(raw?.rateLimitResetCredits?.availableCount);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
 function stop(child) {
     if (!children.delete(child)) return;
     const kill = signal => { try { process.kill(-child.pid, signal); } catch {} };
@@ -157,7 +163,7 @@ async function codex() {
                 if (message.id === 1 && !initialized) {
                     initialized = true;
                     child.stdin.write(JSON.stringify({ method: 'initialized', params: {} }) + '\n');
-                    child.stdin.write(JSON.stringify({ id: 2, method: 'account/rateLimits/read' }) + '\n');
+                    child.stdin.write(JSON.stringify({ id: 2, method: 'account/rateLimits/read', params: { excludeResetCreditDetails: true } }) + '\n');
                 }
                 if (message.id === 2) return message.result ?? null;
             }
@@ -334,12 +340,24 @@ async function kimi() {
     const child = launch('kimi', ['web', '--no-open', '--host', '127.0.0.1', '--port', String(port), '--log-level', 'silent']);
     try {
         const token = await outputUntil(child, buffer => buffer.match(/Local:\s+http:\/\/127\.0\.0\.1:\d+\/#token=([A-Za-z0-9_-]+)/)?.[1]);
-        return await fetchJson(`http://127.0.0.1:${port}/api/v1/oauth/usage`, token);
+        const result = await fetchJson(`http://127.0.0.1:${port}/api/v1/oauth/usage`, token);
+        if (result.data?.kind !== 'ok') return result;
+        // Let the CLI refresh OAuth, then read the raw counters: its web adapter
+        // only exposes `usages`, which can be zero while `usage`/`limits` are not.
+        const home = process.env.KIMI_CODE_HOME || join(homedir(), '.kimi-code');
+        const credentials = JSON.parse(await readFile(join(home, 'credentials/kimi-code.json'), 'utf8'));
+        if (typeof credentials.access_token !== 'string' || !credentials.access_token.trim()) fail('auth');
+        return await fetchJson('https://api.kimi.com/coding/v1/usages', credentials.access_token);
     } finally { stop(child); }
 }
 
 if (process.argv.includes('--self-check')) {
     const { default: assert } = await import('node:assert/strict');
+    assert.equal(resetCredits({ rateLimitResetCredits: { availableCount: 4 } }), 4);
+    assert.equal(resetCredits({ rateLimitResetCredits: { availableCount: 0 } }), 0);
+    assert.equal(resetCredits({ rateLimitResetCredits: null }), null);
+    assert.equal(resetCredits({ rateLimitResetCredits: { availableCount: -1 } }), null);
+    assert.equal(resetCredits({ rateLimitResetCredits: { availableCount: 1.5 } }), null);
     assert.equal(grokTokenResult({ result: { result: { token: ' refreshed-token ' } } }), 'refreshed-token');
     assert.throws(() => grokTokenResult({ result: { result: { token: null } } }), /auth/);
     assert.throws(() => grokTokenResult({ result: { error: 'offline' } }), /unavailable/);
@@ -349,6 +367,11 @@ if (process.argv.includes('--self-check')) {
     assert.equal(normalize('grok', { config: { creditUsagePercent: '43' } })[0].remaining, 57);
     assert.equal(normalize('grok', { config: { currentPeriod: { end: '2026-09-28T00:00:00Z' } } })[0].remaining, null);
     assert.deepEqual(normalize('kimi', { usage: { limit: '100', used: '36' }, limits: [{ window: { duration: 5, unit: 'hour' }, detail: { limit: '100', remaining: '88' } }] }).map(w => w.remaining), [88, 64]);
+    assert.deepEqual(normalize('kimi', {
+        usage: { limit: '100', used: '31', remaining: '69' },
+        limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '79', remaining: '21' } }],
+        usages: { limit_5h: { used_ratio: 0 }, limit_7d: { used_ratio: 0 } }
+    }).map(w => w.remaining), [21, 69]);
     assert.equal(normalize('kimi', { summary: { window: { duration: 7, unit: 'day' }, limit: 0, used: 0 } })[0].remaining, null);
     for (const provider of ['codex', 'grok', 'kimi']) assert.deepEqual(normalize(provider, {}), []);
     assert.equal(windowData(140, null, null).remaining, 0);
@@ -377,9 +400,11 @@ if (process.argv.includes('--self-check')) {
     // ponytail: one-shot CLI readers avoid idle servers; keep connections only if startup cost becomes noticeable.
     await Promise.all(Object.entries({ codex, grok, kimi }).map(async ([id, read]) => {
         try {
-            const windows = normalize(id, await read());
+            const raw = await read();
+            const windows = normalize(id, raw);
             if (!windows.length) fail();
-            process.stdout.write(JSON.stringify({ id, state: 'available', fetchedAt: Date.now(), windows }) + '\n');
+            process.stdout.write(JSON.stringify({ id, state: 'available', fetchedAt: Date.now(), windows,
+                ...(id === 'codex' ? { resetCredits: resetCredits(raw) } : {}) }) + '\n');
         } catch (error) {
             process.stdout.write(JSON.stringify({ id, state: ['auth', 'missing'].includes(error.message) ? error.message : 'unavailable', windows: [] }) + '\n');
         }

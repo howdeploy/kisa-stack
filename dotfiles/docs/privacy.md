@@ -3,7 +3,7 @@
 ## What is shipped
 
 Only selected configuration source files, procedural shaders, reviewed icon assets,
-two identical grain PNGs, public-source patches, installation tools and documentation.
+grain PNGs, generated clock sprite sheets, public-source patches, installation tools and documentation.
 The export was assembled from specific source directories/file types. It is not a
 recursive copy of a home directory or all of `.config`.
 

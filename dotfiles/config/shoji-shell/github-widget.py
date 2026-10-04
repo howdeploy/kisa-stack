@@ -24,6 +24,13 @@ def api(endpoint, *, pages=False, query=None, variables=None):
             raise RuntimeError("Нужна авторизация gh")
         if "403" in result.stderr or "429" in result.stderr:
             raise RuntimeError("GitHub: лимит запросов или недостаточно прав")
+        if "404" in result.stderr:
+            raise RuntimeError("Тема удалена или недоступна (HTTP 404)")
+        status = re.search(r"HTTP (\d{3})", result.stderr)
+        if status:
+            raise RuntimeError(f"GitHub: HTTP {status[1]}")
+        if "error connecting" in result.stderr.lower():
+            raise RuntimeError("Нет соединения с GitHub")
         raise RuntimeError("GitHub временно недоступен")
     value = json.loads(result.stdout)
     if isinstance(value, dict) and value.get("errors"):
@@ -33,6 +40,16 @@ def api(endpoint, *, pages=False, query=None, variables=None):
 
 def graphql(query, variables):
     return api("graphql", query=query, variables=variables)["data"]
+
+
+def error_message(error):
+    if isinstance(error, RuntimeError):
+        return str(error)
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "GitHub не ответил за 90 секунд"
+    if isinstance(error, OSError):
+        return "Не удалось запустить gh или прочитать данные"
+    return "Неожиданный формат ответа GitHub"
 
 
 def discussion(repo, number):
@@ -145,20 +162,22 @@ def collect():
         cache = {}
         if isinstance(snapshot, dict):
             print(json.dumps({"login": login, "fetchedAt": 0, "errors": []}), flush=True)
-    result = {"login": login, "fetchedAt": int(time.time() * 1000), "errors": []}
+    result = {"login": login, "fetchedAt": (cache.get("snapshot") or {}).get("fetchedAt", 0), "errors": []}
     try:
         search = api("search/issues?" + urlencode({"q": f"is:pr is:open user:{login}", "per_page": 1}))
         if search.get("incomplete_results"):
             raise RuntimeError("GitHub вернул неполный список PR")
         result["prCount"] = search["total_count"]
+        # Do not hold the PR counter behind the slower comment requests.
+        print(json.dumps({"login": login, "prCount": result["prCount"], "errors": []}, ensure_ascii=False), flush=True)
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
-        result["errors"].append(str(error) if isinstance(error, RuntimeError) else "Не удалось обновить PR")
+        result["errors"].append("PR: " + error_message(error))
     try:
-        notifications = api("notifications?all=true&per_page=50", pages=True)
-    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
-        result["errors"].append("Не удалось обновить уведомления")
+        notifications = api("notifications?all=false&per_page=50", pages=True)
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
+        result["errors"].append("Уведомления: " + error_message(error))
         return result
-    recent, total, failures, updated = [], 0, 0, {}
+    recent, total, updated = [], 0, {}
     notifications.sort(key=lambda n: n["updated_at"], reverse=True)
     for notification in notifications:
         if notification["subject"]["type"] not in {"PullRequest", "Issue", "Discussion"}:
@@ -166,42 +185,40 @@ def collect():
         if not notification["unread"]:
             continue
         key = notification["id"]
-        fingerprint = [3, notification["updated_at"], notification.get("last_read_at"), notification["unread"], notification["reason"]]
+        fingerprint = [4, notification["updated_at"], notification.get("last_read_at"), notification["unread"],
+                       notification["reason"], notification["subject"].get("latest_comment_url")]
         old = cache.get("threads", {}).get(key, {})
         try:
-            cached = old.get("fingerprint") == fingerprint and time.time() - old.get("checkedAt", 0) < 900
+            cached = old.get("fingerprint") == fingerprint and time.time() - old.get("checkedAt", 0) < 120
             if cached:
                 detail = old["detail"]
             else:
                 detail = resolve(notification, login)
             updated[key] = {"fingerprint": fingerprint, "detail": detail,
                             "checkedAt": old["checkedAt"] if cached else time.time()}
-            show_in_log = True
-            if notification["subject"]["type"] in {"PullRequest", "Issue"}:
-                # A cached notification does not prove the topic is still open.
-                repo = notification["repository"]["full_name"]
-                endpoint = "pulls" if notification["subject"]["type"] == "PullRequest" else "issues"
-                topic = api(f"repos/{repo}/{endpoint}/{detail['number']}")
-                show_in_log = topic["state"] == "open" and not topic.get("merged", False)
-        except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
-            failures += 1
-            continue
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
+            repo = notification["repository"]["full_name"]
+            number = re.search(r"/(\d+)$", notification["subject"].get("url") or "")
+            label = f"{repo} #{number[1]}" if number else f"{repo} (уведомление {key})"
+            result["errors"].append(f"{label}: {error_message(error)}")
+            if not old.get("detail"):
+                continue
+            # Retain the previous timestamp so a failed refresh is retried.
+            updated[key] = old
+            detail = old["detail"]
         total += detail["count"]
-        if show_in_log and detail["commentAt"]:
+        # Closing or merging a topic does not acknowledge its unread comments.
+        if detail["commentAt"]:
             recent.append({"title": notification["subject"]["title"], "repository": notification["repository"]["full_name"],
                            "number": detail["number"], "url": detail["url"], "unread": notification["unread"],
                            "type": notification["subject"]["type"], "updatedAt": detail["commentAt"]})
-    if failures:
-        result["errors"].append(f"Не удалось обновить тем: {failures}")
-    else:
-        result.update(commentCount=total, recent=sorted(recent, key=lambda row: row["updatedAt"], reverse=True)[:5])
-    snapshot = cache.get("snapshot")
-    if not result["errors"]:
-        result["fetchedAt"] = int(time.time() * 1000)
-        snapshot = result
+    result.update(commentCount=total, recent=sorted(recent, key=lambda row: row["updatedAt"], reverse=True)[:5])
+    snapshot = cache.get("snapshot") or {}
+    result["fetchedAt"] = snapshot.get("fetchedAt", 0) if result["errors"] else int(time.time() * 1000)
+    snapshot = {**snapshot, **result}
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = cache_path.with_suffix(".tmp")
+        temporary = cache_path.with_suffix(f".{os.getpid()}.tmp")
         with open(temporary, "w", opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
             json.dump({"login": login, "threads": updated, "snapshot": snapshot}, stream, ensure_ascii=False)
         temporary.replace(cache_path)
@@ -235,7 +252,7 @@ def self_check():
 
     with TemporaryDirectory() as directory, patch.dict(os.environ, XDG_CACHE_HOME=directory):
         cache_path = Path(directory) / "shoji-shell" / "github-widget.json"
-        responses = {"user": {"login": "me"}, "notifications?all=true&per_page=50": []}
+        responses = {"user": {"login": "me"}, "notifications?all=false&per_page=50": []}
         def fake_api(endpoint, **kwargs):
             return {"total_count": 2} if endpoint.startswith("search/issues?") else responses[endpoint]
 
@@ -258,6 +275,64 @@ def self_check():
             collect()
         assert json.loads(output.getvalue().splitlines()[1])["login"] == "other"
         assert json.loads(cache_path.read_text())["snapshot"]["login"] == "other"
+        notices = [{"id": str(i), "unread": True, "updated_at": "1", "reason": "author",
+                    "repository": {"full_name": "other/repo"},
+                    "subject": {"type": "PullRequest", "title": f"PR {i}",
+                                "url": f"https://api.github.com/repos/other/repo/pulls/{i}"}}
+                   for i in (1, 2)]
+        responses["notifications?all=false&per_page=50"] = notices
+        failure = None
+        def partial_api(endpoint, **kwargs):
+            if endpoint.startswith("repos/"):
+                raise AssertionError("Do not filter unread comments by topic state")
+            return fake_api(endpoint, **kwargs)
+        def partial_resolve(notice, login):
+            number = int(notice["subject"]["url"].rsplit("/", 1)[1])
+            if number == 2 and failure:
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired("gh", 90)
+                raise RuntimeError("Тема недоступна")
+            return {"count": (3 if failure else 1) if number == 1 else 2,
+                    "commentAt": "2026-09-28T12:00:00Z", "number": number,
+                    "url": f"https://github.com/other/repo/issues/{number}"}
+        with patch.dict(globals(), api=partial_api, resolve=partial_resolve), redirect_stdout(StringIO()) as output:
+            complete = collect()
+            assert complete["commentCount"] == 3 and not complete["errors"]
+            assert len(complete["recent"]) == 2
+            early = json.loads(output.getvalue().splitlines()[-1])
+            assert early["prCount"] == 2 and "commentCount" not in early and "fetchedAt" not in early
+            old_thread = json.loads(cache_path.read_text())["threads"]["2"]
+            for failure in ("timeout", "resolve"):
+                for notice in notices:
+                    notice["updated_at"] = failure
+                partial = collect()
+                assert partial["commentCount"] == 5 and len(partial["recent"]) == 2
+                assert "other/repo #2:" in partial["errors"][0]
+                assert partial["fetchedAt"] == complete["fetchedAt"]
+                saved = json.loads(cache_path.read_text())
+                assert saved["threads"]["2"] == old_thread
+                assert saved["snapshot"] == partial
+            notices[1]["id"] = "uncached"
+            partial = collect()
+            assert partial["commentCount"] == 3 and len(partial["recent"]) == 1
+            assert partial["errors"]
+            failure = None
+            for notice in notices:
+                notice["updated_at"] = "recovered"
+            recovered = collect()
+            assert not recovered["errors"] and len(recovered["recent"]) == 2
+            def unexpected_resolve(*args):
+                raise AssertionError("Cache missed")
+            with patch.dict(globals(), resolve=unexpected_resolve):
+                assert collect()["commentCount"] == recovered["commentCount"]
+            with patch("time.time", return_value=time.time() + 121):
+                failure = "resolve"
+                assert collect()["errors"]  # Unchanged notification metadata must not freeze the count for 15 minutes.
+            failure = None
+            notices[0]["updated_at"] = "after-read"
+            notices[1]["unread"] = False
+            acknowledged = collect()
+            assert acknowledged["commentCount"] == 1 and len(acknowledged["recent"]) == 1
     print("GitHub comment accounting: OK")
 
 
@@ -270,5 +345,5 @@ if __name__ == "__main__":
         try:
             print(json.dumps(collect(), ensure_ascii=False), flush=True)
         except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
-            message = str(error) if isinstance(error, RuntimeError) else "Не удалось собрать данные GitHub"
+            message = error_message(error)
             print(json.dumps({"errors": [message]}, ensure_ascii=False), flush=True)

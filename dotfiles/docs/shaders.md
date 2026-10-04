@@ -29,7 +29,7 @@ that shader active.
 
 ## ShojiWM ABI
 
-Use the fork's pinned [effects reference](https://github.com/howdeploy/ShojiWM/blob/f61a5f98117c355fe131e3d550970de0ed6a5120/docs/docs/configuration/effects.md)
+Use the fork's pinned [effects reference](https://github.com/howdeploy/ShojiWM/blob/2c767129e5a900310b4d53df9f5952a30f6b5953/docs/docs/configuration/effects.md)
 and the actual `packages/shoji_wm/src/shader.ts` types. The compiler must match the
 assignment: `compileEffect` for composition/background, `compileWindowEffect` for
 windows, `compileLayerEffect` for layers, `compilePopupEffect` for popups.

@@ -30,7 +30,7 @@ Install [Elephant](https://github.com/abenz1267/elephant) and its `desktopapplic
 but cannot drive the extra controls in this theme.
 
 For other distributions, use the fork's
-[installation prerequisites](https://github.com/howdeploy/ShojiWM/blob/f61a5f98117c355fe131e3d550970de0ed6a5120/docs/docs/getting-started/installation.md)
+[installation prerequisites](https://github.com/howdeploy/ShojiWM/blob/2c767129e5a900310b4d53df9f5952a30f6b5953/docs/docs/getting-started/installation.md)
 and the package list as a capability checklist. Install native development headers,
 GTK4/layer-shell, Poppler GLib and Protocol Buffers for Walker. Do not expect the
 Arch package names or KDE polkit executable path to be universal.

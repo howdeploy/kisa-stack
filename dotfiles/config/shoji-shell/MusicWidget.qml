@@ -4,12 +4,14 @@ import QtQuick.Effects
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Widgets
 import Quickshell.Services.Mpris
 
 Item {
     id: root
+    property bool compact: false
     implicitWidth: 286
-    implicitHeight: header.implicitHeight + 10 + spectrumSurface.height
+    implicitHeight: compact ? 206 : header.implicitHeight + 10 + spectrumSurface.height
     width: implicitWidth
     height: implicitHeight
 
@@ -21,18 +23,31 @@ Item {
         return host;
     }
     readonly property var player: {
-        const candidates = Mpris.players.values.filter(p => p.playbackState !== MprisPlaybackState.Stopped);
-        return candidates.find(p => p.isPlaying) || candidates[0] || null;
+        if (!spectrumAvailable || capturePid <= 1 || ambiguousAudio) return null;
+        const candidates = Mpris.players.values.filter(p => p.isPlaying
+            && Number((p.metadata || {})["kde:pid"] || 0) === capturePid
+            && sourceName((p.metadata || {})["xesam:url"]));
+        return candidates.length === 1 ? candidates[0] : null;
     }
-    readonly property string source: player ? sourceName(player.metadata["xesam:url"]) || player.identity : ""
-    readonly property bool playing: !!player && player.isPlaying
-    readonly property int capturePid: player ? Number(player.metadata["kde:pid"] || 0) : 0
-    readonly property string title: player ? player.trackTitle || source : "Ничего не играет"
-    readonly property string artist: player ? player.trackArtist || source : "Включи музыку"
-    readonly property string artwork: player ? player.trackArtUrl : ""
+    readonly property string source: player ? sourceName(player.metadata["xesam:url"])
+        : playing && mateEngine ? "MateEngine" : ""
+    readonly property bool playing: captureWanted && spectrumAvailable && capturePid > 1 && !ambiguousAudio
+        && (!mateEngine || mateTrack.playing === true || rawEnergy > 0.08)
+    property int capturePid: 0
+    property string captureSource: ""
+    readonly property bool mateEngine: captureSource === "mateengine"
+    property var mateTrack: ({})
+    readonly property string mateIcon: Qt.resolvedUrl("icons/mateengine.svg").toString()
+    property bool ambiguousAudio: false
+    readonly property string title: player ? player.trackTitle || source
+        : ambiguousAudio ? "Несколько аудиопотоков" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.title || "MateEngine") : "Звук браузера") : "Ничего не играет"
+    readonly property string artist: player ? player.trackArtist || source
+        : ambiguousAudio ? "Источник неоднозначен" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.artist || "MateEngine") : "Без данных о треке") : "Включи музыку"
+    readonly property string artwork: player ? player.trackArtUrl : mateEngine && playing ? (mateTrack.playing && mateTrack.artwork || mateIcon) : ""
     property var levels: []
     property bool spectrumAvailable: false
-    readonly property bool captureWanted: visible && playing && capturePid > 0
+    // MPRIS may remain paused on another tab while Web Audio is already playing.
+    readonly property bool captureWanted: visible
     readonly property real rawEnergy: captureWanted && spectrumAvailable
         ? Math.max.apply(Math, [0].concat(levels)) : 0
     readonly property real bass: captureWanted && spectrumAvailable
@@ -51,7 +66,7 @@ Item {
     // One travelling palette ties the dark backdrop to the brighter spectrum.
     function spectrumColor(offset) {
         return Qt.hsla(0.54 + 0.36 * (0.5 + 0.5 * Math.sin(flowPhase - offset * 2.4)),
-            0.45 + energy * 0.18, 0.72 + pulse * 0.06, 1);
+            compact ? 0.78 : 0.45 + energy * 0.18, compact ? 0.66 + pulse * 0.06 : 0.72 + pulse * 0.06, 1);
     }
     function spectrumBackground(offset) {
         const tint = spectrumColor(offset);
@@ -71,33 +86,46 @@ Item {
         }
     }
 
+
     function stopSpectrum() {
         spectrum.running = false;
+        resetSpectrum();
+    }
+    function resetSpectrum() {
         levels = [];
         spectrumAvailable = false;
+        capturePid = 0;
+        captureSource = "";
+        mateTrack = ({});
+        ambiguousAudio = false;
     }
-    onCapturePidChanged: stopSpectrum()
     onCaptureWantedChanged: { if (!captureWanted) stopSpectrum(); }
     Process {
         id: spectrum
-        command: ["python3", Qt.resolvedUrl("music-spectrum.py").toString().replace("file://", ""), String(root.capturePid)]
+        command: ["python3", Qt.resolvedUrl("music-spectrum.py").toString().replace("file://", ""), "--auto"]
         stdout: SplitParser {
             onRead: data => {
                 try {
                     const frame = JSON.parse(data);
-                    if (!root.captureWanted || frame.pid !== root.capturePid) return;
+                    if (!root.captureWanted) return;
+                    if (!Number.isInteger(frame.pid) || frame.pid < 0 || typeof frame.ambiguous !== "boolean") return;
+                    if (frame.source !== undefined && !["", "browser", "mateengine"].includes(frame.source)) return;
                     if (!Array.isArray(frame.bars) || frame.bars.length !== 24
                         || !frame.bars.every(v => typeof v === "number" && isFinite(v) && v >= 0 && v <= 1)) return;
                     root.levels = frame.bars;
+                    root.capturePid = frame.pid;
+                    root.captureSource = frame.source || "";
+                    root.mateTrack = frame.source === "mateengine" && frame.track && typeof frame.track === "object" ? frame.track : ({});
+                    root.ambiguousAudio = frame.ambiguous;
                     root.spectrumAvailable = frame.available === true;
                     spectrumTimeout.restart();
-                } catch (error) { root.levels = []; root.spectrumAvailable = false; }
+                } catch (error) { root.resetSpectrum(); }
             }
         }
-        onExited: { root.levels = []; root.spectrumAvailable = false; }
+        onExited: root.resetSpectrum()
     }
     Timer { interval: 2000; repeat: true; running: root.captureWanted; triggeredOnStart: true; onTriggered: { if (!spectrum.running) spectrum.running = true; } }
-    Timer { id: spectrumTimeout; interval: 1500; onTriggered: { root.levels = []; root.spectrumAvailable = false; } }
+    Timer { id: spectrumTimeout; interval: 3500; onTriggered: root.resetSpectrum() }
 
     component Grain: Canvas {
         id: grain
@@ -125,14 +153,16 @@ Item {
     }
     RowLayout {
         id: header
+        visible: !root.compact
         anchors { top: parent.top; left: parent.left; right: parent.right }
         spacing: 14
         Rectangle {
-            Layout.preferredWidth: 64; Layout.preferredHeight: 64
+            Layout.preferredWidth: root.compact ? 48 : 64; Layout.preferredHeight: root.compact ? 48 : 64
             Layout.alignment: Qt.AlignVCenter
             radius: 4; color: Theme.raised
             Image { id: cover; anchors.fill: parent; source: root.artwork; asynchronous: true; fillMode: Image.PreserveAspectCrop; sourceSize.width: 128; sourceSize.height: 128 }
-            PanelIcon { anchors.centerIn: parent; name: "headphones"; tint: Theme.muted; visible: cover.status !== Image.Ready }
+            Image { anchors.fill: parent; anchors.margins: 8; source: root.mateIcon; fillMode: Image.PreserveAspectFit; visible: root.mateEngine && cover.status !== Image.Ready }
+            PanelIcon { anchors.centerIn: parent; name: "headphones"; tint: Theme.muted; visible: !root.mateEngine && cover.status !== Image.Ready }
         }
         ColumnLayout {
             Layout.fillWidth: true
@@ -150,7 +180,7 @@ Item {
             UiText {
                 Layout.fillWidth: true
                 text: root.title
-                font.pixelSize: 20; font.weight: Font.Bold
+                font.pixelSize: root.compact ? 16 : 20; font.weight: Font.Bold
                 color: "white"
                 maximumLineCount: 2; wrapMode: Text.Wrap
                 Accessible.name: text
@@ -163,11 +193,58 @@ Item {
             }
         }
     }
+    ClippingRectangle {
+        id: homeCover
+        visible: root.compact
+        x: 0; y: 0; width: 122; height: 122
+        radius: 22; color: Theme.raised
+        layer.enabled: root.compact
+        layer.effect: MultiEffect {
+            shadowEnabled: true; shadowColor: "#080810"; shadowOpacity: 0.6
+            shadowVerticalOffset: 4; shadowBlur: 0.8; blurMax: 12
+        }
+        Image {
+            id: homeArtwork
+            anchors.fill: parent; source: root.compact ? root.artwork : ""
+            asynchronous: true; fillMode: Image.PreserveAspectCrop
+            sourceSize: Qt.size(244, 244)
+        }
+        Image { anchors.fill: parent; anchors.margins: 16; source: root.mateIcon; fillMode: Image.PreserveAspectFit; visible: root.mateEngine && homeArtwork.status !== Image.Ready }
+        PanelIcon { anchors.centerIn: parent; width: 32; height: 32; name: "headphones"; tint: Theme.ink; visible: !root.mateEngine && homeArtwork.status !== Image.Ready }
+    }
+    WidgetSurface {
+        id: homeCard
+        visible: root.compact
+        x: 52; y: 62; width: root.width - 52; height: root.height - 62
+        radius: 20; color: Theme.surface
+        border.width: 1; border.color: "#20ffffff"
+        Column {
+            anchors { top: parent.top; left: parent.left; right: parent.right; margins: 14 }
+            spacing: 3
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true; shadowColor: "#080810"; shadowOpacity: 1
+                shadowVerticalOffset: 2; shadowBlur: 0.7; blurMax: 8
+            }
+            UiText {
+                width: parent.width; text: root.title
+                font.pixelSize: 17; font.weight: Font.Bold; color: "white"
+                maximumLineCount: 2; wrapMode: Text.Wrap
+                Accessible.name: text
+            }
+            UiText { width: parent.width; text: root.artist; font.pixelSize: 11; color: "#f2f2f2" }
+        }
+    }
     Item {
         id: spectrumSurface
+        parent: root.compact ? homeCard : root
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: 44
+        anchors.leftMargin: root.compact ? 14 : 0
+        anchors.rightMargin: root.compact ? 14 : 0
+        anchors.bottomMargin: root.compact ? 12 : 0
+        height: root.compact ? 46 : 44
         Rectangle {
+            visible: !root.compact
             anchors.fill: parent
             opacity: 0.55
             radius: 10
@@ -183,8 +260,17 @@ Item {
             Grain { strength: 0.045 }
         }
         Item {
-            anchors { fill: parent; leftMargin: 16; rightMargin: 16; topMargin: 10; bottomMargin: 10 }
+            anchors {
+                fill: parent
+                leftMargin: root.compact ? 0 : 16; rightMargin: root.compact ? 0 : 16
+                topMargin: root.compact ? 2 : 10; bottomMargin: root.compact ? 2 : 10
+            }
             Accessible.ignored: true
+            layer.enabled: root.compact
+            layer.effect: MultiEffect {
+                shadowEnabled: true; shadowColor: "#080810"; shadowOpacity: 0.9
+                shadowVerticalOffset: 2; shadowBlur: 0.6; blurMax: 8
+            }
             Row {
                 anchors.fill: parent
                 spacing: 3
@@ -195,13 +281,13 @@ Item {
                         width: (parent.width - 23 * 3) / 24
                         height: parent.height
                         Rectangle {
-                            anchors.bottom: parent.bottom
+                            y: root.compact ? (parent.height - height) / 2 : parent.height - height
                             width: parent.width
                             height: Math.max(2, parent.height * (root.levels[index] || 0))
-                            radius: 1
+                            radius: root.compact ? width / 2 : 1
                             color: root.captureWanted && root.spectrumAvailable && root.rawEnergy > 0.08
-                                ? root.spectrumColor(index / 23) : Theme.line
-                            opacity: 0.4 + root.energy * 0.5 + root.pulse * 0.1
+                                ? root.spectrumColor(index / 23) : root.compact ? "#cdd6f4" : Theme.line
+                            opacity: root.compact ? 0.90 + root.pulse * 0.10 : 0.4 + root.energy * 0.5 + root.pulse * 0.1
                             Behavior on color { ColorAnimation { duration: 160 } }
                             Behavior on height { NumberAnimation { duration: 75 } }
                         }

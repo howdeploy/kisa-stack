@@ -8,7 +8,7 @@ import sys
 
 
 def run(*args):
-    return subprocess.check_output(['ddcutil', *args], text=True, timeout=12,
+    return subprocess.check_output(['ddcutil', '--skip-ddc-checks', *args], text=True, timeout=12,
                                    stderr=subprocess.DEVNULL)
 
 
@@ -38,13 +38,18 @@ def main():
     mode, connector, *rest = sys.argv[1:]
     if mode not in ('get', 'set') or not re.fullmatch(r'[A-Za-z0-9-]+', connector):
         raise ValueError('Некорректный запрос яркости')
-    bus = bus_for(connector, run('detect', '--brief'))
+    bus = rest[1] if len(rest) > 1 else ''
+    if bus and not re.fullmatch(r'\d+', bus):
+        raise ValueError('Некорректная шина DDC/CI')
+    if not bus:
+        bus = bus_for(connector, run('detect', '--brief'))
     current, maximum = brightness(run('--bus', bus, 'getvcp', '10', '--terse'))
     if mode == 'set':
         level = raw_level(float(rest[0]), maximum)
         run('--bus', bus, 'setvcp', '10', str(level))
         current, maximum = brightness(run('--bus', bus, 'getvcp', '10', '--terse'))
-    return {'available': True, 'value': round(current * 100 / maximum), 'error': ''}
+    return {'available': True, 'value': round(current * 100 / maximum), 'error': '',
+            'connector': connector, 'bus': bus}
 
 
 if __name__ == '__main__':
@@ -58,6 +63,18 @@ if __name__ == '__main__':
             pass
         else:
             raise AssertionError('Non-finite brightness accepted')
+        calls = []
+        def fake_run(*args):
+            calls.append(args)
+            return 'Display 1\n I2C bus: /dev/i2c-4\n DRM connector: card1-DP-1\n' if args[0] == 'detect' else 'VCP 10 C 75 150\n'
+        run = fake_run
+        sys.argv = [sys.argv[0], 'get', 'DP-1', '0', '']
+        result = main()
+        assert result['bus'] == '4' and result['value'] == 50
+        calls.clear()
+        sys.argv[-1] = result['bus']
+        assert main()['value'] == 50
+        assert calls == [('--bus', '4', 'getvcp', '10', '--terse')]
         print('DDC parsing and range checks passed.')
     else:
         try:

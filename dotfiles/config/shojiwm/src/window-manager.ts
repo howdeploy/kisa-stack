@@ -51,6 +51,9 @@ export const WINDOW_STATE_RESTORE_RECT =
 export const WINDOW_STATE_MINIMIZED = createWindowState<boolean>("minimized", {
   default: false,
 });
+export const WINDOW_STATE_PINNED = createWindowState<boolean>("pinned", {
+  default: false,
+});
 export const WINDOW_STATE_MINIMIZE_VISUAL_IDLE = createWindowState<boolean>(
   "minimizeVisualIdle",
   {
@@ -68,6 +71,9 @@ export const WINDOW_STATE_FULLSCREEN = createWindowState<boolean>(
 );
 export const WINDOW_STATE_FULLSCREEN_WITH_CHROME = createWindowState<boolean>(
   "fullscreenWithChrome", { default: false },
+);
+export const WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS = createWindowState<boolean>(
+  "fullscreenAllOutputs", { default: false },
 );
 // Pre-fullscreen rect, kept separate from WINDOW_STATE_RESTORE_RECT so a
 // window that was maximized before going fullscreen restores back to its
@@ -169,7 +175,7 @@ const TILE_GAP = 12;
 const TILE_MARGIN = 12;
 const TILE_WIDTH_RATIO = 0.5;
 const TILE_MIN_WIDTH = 240;
-export const PERSISTENT_WORKSPACE_COUNT = 3;
+export const PERSISTENT_WORKSPACE_COUNT = 4;
 // Fractional-scale rounding can leave a tile a hair past the screen edge;
 // overflow at or below this is "fully visible" for the focus-key pan step.
 const MANAGED_WINDOW_ONLY_REBUILD_SUPPRESSION = {
@@ -255,11 +261,13 @@ interface WorkspaceSnapshot {
 
 interface WorkspaceWindowSnapshot {
   id: string;
+  pinned?: boolean;
   tileWidth?: number;
   floatingRect?: ManagedWindowRect | null;
   floatingMaximized?: boolean;
   restoreRect?: ManagedWindowRect | null;
   fullscreenWithChrome?: boolean;
+  fullscreenAllOutputs?: boolean;
   fullscreenRestoreRect?: ManagedWindowRect | null;
   snapZone?: SnapZone | null;
   snapMonitor?: string | null;
@@ -433,15 +441,45 @@ function isTelegramMediaViewer(window: WaylandWindow): boolean {
     && (title === "просмотр медиа" || title === "media viewer");
 }
 
+export function isPictureInPictureWindow(window: WaylandWindow): boolean {
+  // ponytail: the API has no PiP role; use exact titles until a native role is exposed.
+  const title = window.title().trim().toLowerCase().replace(/[-\u2010-\u2015]/g, " ");
+  if (title === "picture in picture" || title === "картинка в картинке") return true;
+  // Telegram clears the transient parent and uses its generic application title.
+  // Its PiP sets finite size limits; the main window has no maximum size.
+  const max = window.sizeConstraints().max;
+  return /^org\.telegram\.desktop(?:[._]|$)/i.test(window.appId() ?? "")
+    && title === "telegramdesktop"
+    && !!max && max.width > 0 && max.height > 0;
+}
+
+export function isSteamNotificationWindow(window: WaylandWindow): boolean {
+  return window.appId()?.toLowerCase() === "steam"
+    && /^notificationtoasts_\d+_desktop$/.test(window.title());
+}
+
+function isPortalDialogWindow(window: WaylandWindow): boolean {
+  return window.appId() === "xdg-desktop-portal-gtk";
+}
+
 export function isFloatingUtilityWindow(window: WaylandWindow): boolean {
   const appId = (window.appId() ?? "").toLowerCase();
-  return appId === "flameshot" || appId === "org.flameshot.flameshot"
+  return isPictureInPictureWindow(window) || isPortalDialogWindow(window)
+    || isSteamNotificationWindow(window)
+    || appId === "flameshot" || appId === "org.flameshot.flameshot"
     || appId === "pavucontrol" || appId === "org.pulseaudio.pavucontrol";
+}
+
+// MateEngine desktop pet (XWayland via satellite): a transparent floating
+// window that never tiles and never takes focus by itself.
+export function isMateEngineWindow(window: WaylandWindow): boolean {
+  return window.appId() === "MateEngineX.x86_64";
 }
 
 function canTileWindow(window: WaylandWindow): boolean {
   return window.isResizable() && !window.isTransient()
-    && !isFloatingUtilityWindow(window) && !isTelegramMediaViewer(window);
+    && !isFloatingUtilityWindow(window) && !isTelegramMediaViewer(window)
+    && !isMateEngineWindow(window);
 }
 
 export class HybridWindowManager {
@@ -460,6 +498,12 @@ export class HybridWindowManager {
   >();
   private currentMonitor: string;
   private isGrabbing = false;
+  private clientDrag: {
+    window: WaylandWindow;
+    startRect: { x: number; y: number; width: number; height: number };
+    startPointer: { x: number; y: number };
+  } | null = null;
+  private clientDragExpiry: ReturnType<typeof setTimeout> | null = null;
   private tileDrag: {
     window: WaylandWindow;
     workspace: Workspace;
@@ -492,6 +536,7 @@ export class HybridWindowManager {
   private workspaceGestureSpeed = { ...DEFAULT_WORKSPACE_GESTURE_SPEED };
   private lastPointerPosition: PointerMoveEvent["position"] | null = null;
   private lastPointerTarget: PointerMoveEvent["target"] = { kind: "none" };
+  private hoverFocusTimer: ReturnType<typeof setTimeout> | null = null;
   // Broadcasts the active snap-zone preview rect to external clients (the bar).
   private snapPreviewBroadcaster: SnapPreviewBroadcaster | null = null;
   private workspaceChangeBroadcaster: WorkspaceChangeBroadcaster | null = null;
@@ -548,8 +593,28 @@ export class HybridWindowManager {
     this.syncWorkspaces();
     this.currentMonitor = event.outputName ?? this.currentMonitor;
     this.lastPointerPosition = event.position;
+    const sameWindow = event.target.kind === "window"
+      && this.lastPointerTarget.kind === "window"
+      && event.target.windowId === this.lastPointerTarget.windowId;
     this.lastPointerTarget = event.target;
-    this.focusWindowAtPointerTarget(event.target, event.outputName);
+    if (this.clientDrag) return;
+    if (sameWindow) {
+      if (this.hoverFocusTimer === null) {
+        this.focusWindowAtPointerTarget(event.target, event.outputName);
+      }
+      return;
+    }
+    if (this.hoverFocusTimer !== null) {
+      clearTimeout(this.hoverFocusTimer);
+      this.hoverFocusTimer = null;
+    }
+    if (event.target.kind === "window") {
+      // Do not raise windows merely crossed on the way to another monitor.
+      this.hoverFocusTimer = setTimeout(() => {
+        this.hoverFocusTimer = null;
+        this.focusWindowAtPointerTarget(this.lastPointerTarget, event.outputName);
+      }, 100);
+    }
   }
 
   public onGestureSwipe(event: GestureSwipeEvent) {
@@ -610,6 +675,15 @@ export class HybridWindowManager {
     );
     if (liveMonitors.size === 0) {
       return;
+    }
+    for (const workspace of this.workspaces.values()) {
+      for (const window of workspace.listWindows()) {
+        if (!window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()) continue;
+        const rect = this.fullscreenRectForWindow(window);
+        stopRectAnimation(window, WINDOW_STATE_RECT);
+        window.state[WINDOW_STATE_RECT].set(rect);
+        workspace.syncFloatingWindowRect(window, rect);
+      }
     }
 
     const fallbackMonitor =
@@ -687,7 +761,9 @@ export class HybridWindowManager {
 
   public onOpen(window: WaylandWindow) {
     this.trackWindowTileability(window);
-    window.focus();
+    if (!isMateEngineWindow(window)) {
+      window.focus();
+    }
     this.windowStack.add(window);
 
     window.setCloseAnimationDuration(OPEN_CLOSE_ANIMATION_DURATION);
@@ -724,11 +800,13 @@ export class HybridWindowManager {
     const unsubscribeTransient = window.isTransient.subscribe(onChange);
     const unsubscribeAppId = window.appId.subscribe(onChange);
     const unsubscribeTitle = window.title.subscribe(onChange);
+    const unsubscribeConstraints = window.sizeConstraints.subscribe(onChange);
     this.tileabilitySubscriptionsByWindowId.set(window.id, () => {
       unsubscribeResizable();
       unsubscribeTransient();
       unsubscribeAppId();
       unsubscribeTitle();
+      unsubscribeConstraints();
     });
   }
 
@@ -739,6 +817,7 @@ export class HybridWindowManager {
   }
 
   public dispose() {
+    this.endClientDrag();
     for (const workspace of this.workspaces.values()) {
       workspace.clearExitLayoutHolds();
       workspace.setVisible(workspace.isActive());
@@ -809,8 +888,23 @@ export class HybridWindowManager {
     }
 
     let restoredExistingWindow = false;
-    const workspace =
-      this.findWorkspaceRestoringWindow(window) ?? this.getCurrentWorkspace();
+    const notificationMonitor = isSteamNotificationWindow(window)
+      ? [...COMPOSITOR.output.list].sort((a, b) =>
+        COMPOSITOR.output.current[b].position.x - COMPOSITOR.output.current[a].position.x,
+      )[0]
+      : undefined;
+    const restoringWorkspace = this.findWorkspaceRestoringWindow(window);
+    let workspace =
+      restoringWorkspace
+      ?? (notificationMonitor ? this.workspaceForMonitor(notificationMonitor) : this.getCurrentWorkspace());
+    if (!restoringWorkspace && workspace && !window.isTransient()
+      && window.appId()?.toLowerCase() === "canvastty") {
+      workspace = this.ensureWorkspace(workspace.monitor, 4);
+      this.switchWorkspaceTo(workspace.monitor, workspace.index, {
+        focusActiveAfter: false,
+        carryDraggedWindow: false,
+      });
+    }
     if (workspace) {
       restoredExistingWindow = workspace.addWindow(window, options);
       if (
@@ -1021,6 +1115,7 @@ export class HybridWindowManager {
   }
 
   public onStartClose(window: WaylandWindow) {
+    if (this.clientDrag?.window.id === window.id) this.endClientDrag();
     stopRectAnimation(window, WINDOW_STATE_RECT);
     scheduleCloseAnimation(window);
 
@@ -1196,6 +1291,110 @@ export class HybridWindowManager {
     stopRectAnimation(window, WINDOW_STATE_RECT);
     window.state[WINDOW_STATE_RECT].set(event.currentRect);
     this.applyWorkspaceStackPolicy(workspace);
+  }
+
+  public getWindowMonitor(window: WaylandWindow): string | undefined {
+    return this.findWorkspaceForWindow(window)?.monitor;
+  }
+
+  /**
+   * Client-requested move of a floating window to an absolute logical
+   * position (MateEngine positions itself over IPC: satellite drops X11 move
+   * requests). Like a floating drag, the window follows the output under its
+   * centre (or its explicit support) to that output's active workspace. Focus and the target
+   * workspace's active window are left alone. Ignored while the user drags
+   * the window: the pointer wins.
+   */
+  public moveFloatingWindowTo(window: WaylandWindow, x: number, y: number, preferredMonitor?: string) {
+    const workspace = this.findWorkspaceForWindow(window);
+    if (
+      !workspace ||
+      (preferredMonitor !== undefined && !COMPOSITOR.output.list.includes(preferredMonitor)) ||
+      this.isMovingWindow(window) ||
+      (workspace.isTiled && workspace.shouldTile(window)) ||
+      window.state[WINDOW_STATE_FULLSCREEN]() ||
+      window.state[WINDOW_STATE_MAXIMIZED]()
+    ) {
+      return;
+    }
+    const current = window.state[WINDOW_STATE_RECT]();
+    const rect: ManagedWindowRect = {
+      x,
+      y,
+      width: read(current.width),
+      height: read(current.height),
+    };
+    stopRectAnimation(window, WINDOW_STATE_RECT);
+    window.state[WINDOW_STATE_RECT].set(rect);
+
+    // An anchored avatar can have a very large transparent client whose
+    // centre lies on another output. Its support owns the output instead.
+    const monitor = preferredMonitor ?? this.outputNameAt(x + rect.width / 2, y + rect.height / 2);
+    if (!monitor || monitor === workspace.monitor) {
+      workspace.syncFloatingWindowRect(window, rect);
+      workspace.syncWindowVisibleOutputs(window);
+      this.updateClientDragPortal(window, "update");
+      return;
+    }
+    const target = this.ensureWorkspace(
+      monitor,
+      this.getActiveWorkspaceIndex(monitor),
+    );
+    workspace.removeFloatingWindow(window);
+    workspace.applyLayout();
+    target.adoptFloatingWindow(window, rect, true);
+    this.syncWorkspaceVisibility();
+    this.applyWorkspaceStackPolicy(workspace);
+    this.applyWorkspaceStackPolicy(target);
+    this.updateClientDragPortal(window, "update");
+    this.workspaceChangeBroadcaster?.();
+  }
+
+  public setClientWindowDragging(window: WaylandWindow, dragging: boolean) {
+    if (!isMateEngineWindow(window)) return;
+    if (!dragging || this.isMovingWindow(window)) {
+      if (this.clientDrag?.window.id === window.id) this.endClientDrag();
+      return;
+    }
+    if (this.clientDrag?.window.id !== window.id) {
+      this.endClientDrag();
+      if (this.hoverFocusTimer !== null) clearTimeout(this.hoverFocusTimer);
+      this.hoverFocusTimer = null;
+      const rect = window.state[WINDOW_STATE_RECT]();
+      const startRect = { x: read(rect.x), y: read(rect.y), width: read(rect.width), height: read(rect.height) };
+      this.clientDrag = { window, startRect,
+        startPointer: this.lastPointerPosition ?? { x: startRect.x, y: startRect.y } };
+      this.updateClientDragPortal(window, "start");
+    }
+    if (this.clientDragExpiry !== null) clearTimeout(this.clientDragExpiry);
+    // IPC has no disconnect callback. A heartbeat lease also covers crashes
+    // and a client that loses its release event, including a stationary drag.
+    this.clientDragExpiry = setTimeout(() => this.endClientDrag(), 1000);
+  }
+
+  private updateClientDragPortal(window: WaylandWindow, phase: "start" | "update" | "end") {
+    const drag = this.clientDrag;
+    if (!drag || drag.window.id !== window.id) return;
+    const rect = window.state[WINDOW_STATE_RECT]();
+    const currentPointer = this.lastPointerPosition ?? drag.startPointer;
+    updateMonitorPortal({ window, source: "xwayland", phase,
+      startRect: drag.startRect,
+      currentRect: { x: read(rect.x), y: read(rect.y), width: read(rect.width), height: read(rect.height) },
+      startPointer: drag.startPointer, currentPointer,
+      delta: { x: currentPointer.x - drag.startPointer.x, y: currentPointer.y - drag.startPointer.y },
+      modifiers: { super: false, ctrl: false, alt: false, shift: false }, timestamp: Date.now() });
+  }
+
+  private endClientDrag() {
+    if (this.clientDragExpiry !== null) clearTimeout(this.clientDragExpiry);
+    this.clientDragExpiry = null;
+    if (this.clientDrag) this.updateClientDragPortal(this.clientDrag.window, "end");
+    this.clientDrag = null;
+  }
+
+  /** True while the user drags this floating window (e.g. Super+drag). */
+  public isMovingWindow(window: WaylandWindow): boolean {
+    return this.floatingDrag?.window.id === window.id;
   }
 
   private onFloatingWindowMove(event: WindowMoveEvent, workspace: Workspace) {
@@ -1396,7 +1595,9 @@ export class HybridWindowManager {
     if (window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
       const restoreRect = window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
       window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(false);
+      window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS].set(false);
       window.state[WINDOW_STATE_FULLSCREEN].set(false);
+      workspace?.syncWindowVisibleOutputs(window);
       window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(null);
       if (restoreRect) {
         stopRectAnimation(window, WINDOW_STATE_RECT);
@@ -1544,6 +1745,15 @@ export class HybridWindowManager {
   }
 
   public onWindowActivateRequest(event: WindowActivateRequestEvent) {
+    // The pet raises itself on start and on its own timers; only explicit
+    // user activations (dock/API, keybinds) may focus it. Clicks on its body
+    // still focus it through the compositor, so menus and chat input work.
+    if (
+      isMateEngineWindow(event.window) &&
+      (event.source === "xdg-activation" || event.source === "xwayland")
+    ) {
+      return;
+    }
     const wasMinimized = event.window.state[WINDOW_STATE_MINIMIZED]();
     if (wasMinimized) {
       this.onWindowMinimizeRequest({
@@ -1765,25 +1975,56 @@ export class HybridWindowManager {
     }
   }
 
+  public isWindowAboveFullscreen(window: WaylandWindow): boolean {
+    return window.isTransient() || isFloatingUtilityWindow(window) || this.isWindowPinned(window);
+  }
+
+  public toggleWindowPin(window: WaylandWindow) {
+    const pinned = window.state[WINDOW_STATE_PINNED];
+    pinned.set(!pinned());
+    markWindowCompositionDirty(window);
+  }
+
+  public toggleFocusedWindowPin() {
+    const window = this.listWindows().find(window => window.isFocused());
+    if (window) this.toggleWindowPin(window);
+  }
+
+  public isWindowPinned(window: WaylandWindow): boolean {
+    const visited = new Set<string>();
+    let current: WaylandWindow | undefined = window;
+    while (current && !visited.has(current.id)) {
+      if (current.state[WINDOW_STATE_PINNED]()) return true;
+      visited.add(current.id);
+      const parentId = current.parentId();
+      current = parentId ? this.findWindowById(parentId) : undefined;
+    }
+    return false;
+  }
+
   // Super+F fills the output without asking the client to hide its UI.
   // Native fullscreen requests (browser F11, games) retain their own path.
-  public toggleFocusedWindowFullscreen() {
+  public toggleFocusedWindowFullscreen(allOutputs = false) {
     if (this.isGrabbing) return;
     for (const workspace of this.workspaces.values()) {
       const focused = workspace.focusedWindow();
       if (!focused) {
         continue;
       }
-      if (focused.state[WINDOW_STATE_FULLSCREEN]() &&
-          !focused.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
+      const nativeFullscreen = focused.state[WINDOW_STATE_FULLSCREEN]() &&
+        !focused.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]();
+      if (nativeFullscreen &&
+          (!allOutputs || focused.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]())) {
         focused.unfullscreen();
       } else {
         this.onWindowFullscreenRequest({
           window: focused,
-          fullscreen: !focused.state[WINDOW_STATE_FULLSCREEN](),
+          fullscreen: allOutputs
+            ? !focused.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()
+            : !focused.state[WINDOW_STATE_FULLSCREEN](),
           source: "keybind",
           timestamp: Date.now(),
-        }, true);
+        }, !nativeFullscreen, allOutputs);
       }
       return;
     }
@@ -1794,21 +2035,28 @@ export class HybridWindowManager {
     if (!output?.resolution) return false;
     const left = output.position.x + (output.resolution.width / output.scale - width) / 2;
     const bottom = output.position.y + output.resolution.height / output.scale;
-    const workspace = this.workspaceForMonitor(monitor);
-    return workspace?.listWindows().some((window) => {
-      if (window.state[WINDOW_STATE_MINIMIZED]()) return false;
+    return this.windowsOnMonitor(monitor).some((window) => {
+      if (isMateEngineWindow(window) || window.state[WINDOW_STATE_MINIMIZED]()) return false;
       const rect = window.state[WINDOW_STATE_RECT]();
       return read(rect.x) < left + width && read(rect.x) + read(rect.width) > left &&
         read(rect.y) < bottom && read(rect.y) + read(rect.height) > bottom - height;
-    }) ?? false;
+    });
   }
 
   public hasChromeFullscreen(monitor: string): boolean {
     if (!COMPOSITOR.output.current[monitor]) return false;
-    return this.workspaceForMonitor(monitor)?.listWindows().some((window) =>
+    return this.windowsOnMonitor(monitor).some((window) =>
       window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() &&
       !window.state[WINDOW_STATE_MINIMIZED](),
-    ) ?? false;
+    );
+  }
+
+  private windowsOnMonitor(monitor: string): WaylandWindow[] {
+    return Array.from(this.workspaces.values())
+      .filter((workspace) => workspace.isActive())
+      .flatMap((workspace) => workspace.listWindows().filter((window) =>
+        workspace.monitor === monitor || window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS](),
+      ));
   }
 
   public refreshUsableAreaLayouts() {
@@ -1863,12 +2111,30 @@ export class HybridWindowManager {
     }
     const carryDrag = options.carryDraggedWindow !== false &&
       this.isGrabbing && (this.floatingDrag !== null || this.tileDrag !== null);
+    const carryClientDrag = options.carryDraggedWindow !== false && this.clientDrag !== null;
     this.switchWorkspaceOnMonitor(monitor, targetIndex,
-      carryDrag ? { focusActiveAfter: false } : options);
+      carryDrag || carryClientDrag ? { focusActiveAfter: false } : options);
     if (carryDrag) {
       this.moveDraggedWindowToWorkspace(targetIndex);
     }
+    if (carryClientDrag) this.moveClientDraggedWindowToWorkspace(targetIndex);
     this.workspaceChangeBroadcaster?.();
+  }
+
+  private moveClientDraggedWindowToWorkspace(targetIndex: number) {
+    const window = this.clientDrag?.window;
+    if (!window) return;
+    const from = this.findWorkspaceForWindow(window);
+    if (!from || from.index === targetIndex) return;
+    const to = this.ensureWorkspace(from.monitor, targetIndex);
+    const rect = window.state[WINDOW_STATE_RECT]();
+    from.removeFloatingWindow(window);
+    from.applyLayout();
+    cancelWorkspaceVisualAnimation(window);
+    to.adoptFloatingWindow(window, rect, true);
+    this.syncWorkspaceVisibility();
+    this.applyWorkspaceStackPolicy(from);
+    this.applyWorkspaceStackPolicy(to);
   }
 
   private moveDraggedWindowToWorkspace(targetIndex: number) {
@@ -1942,7 +2208,7 @@ export class HybridWindowManager {
     fromWorkspace.setVisible(false);
     toWorkspace.setVisible(true);
     if (!this.isGrabbing) toWorkspace.refreshUsableAreaLayout();
-    toWorkspace.applyLayout({ animate: false });
+    toWorkspace.applyLayout({ animate: this.isGrabbing, spring: this.isGrabbing });
     finishWorkspaceWave(monitor);
     // Callers that explicitly want to focus a *different* window after the
     // transition (e.g. dock activation) opt out of the implicit focus so the
@@ -2539,15 +2805,11 @@ export class HybridWindowManager {
       workspace.findWindowById(target.windowId),
     );
     const window = workspace?.findWindowById(target.windowId);
-    if (!workspace || !window) {
+    if (!workspace || !window || isMateEngineWindow(window)) {
       return;
     }
 
-    const focusOnOtherMonitor = Array.from(this.workspaces.values()).some(
-      (current) => current.monitor !== workspace.monitor &&
-        current.isActive() && current.focusedWindow() !== undefined,
-    );
-    if ((!workspace.isTiled && !focusOnOtherMonitor) || !workspace.isActive()) {
+    if (!workspace.isActive()) {
       return;
     }
 
@@ -2584,6 +2846,7 @@ export class HybridWindowManager {
       .filter(
         (window) =>
           !window.state[WINDOW_STATE_MINIMIZED]() &&
+          !isMateEngineWindow(window) &&
           this.windowStack.has(window) &&
           managedRectContainsPoint(
             window.state[WINDOW_STATE_RECT](),
@@ -2593,6 +2856,8 @@ export class HybridWindowManager {
       )
       .sort(
         (a, b) =>
+          Number(this.isWindowAboveFullscreen(b))
+          - Number(this.isWindowAboveFullscreen(a)) ||
           this.windowStack.zIndexValue(b) - this.windowStack.zIndexValue(a),
       )[0];
     if (!window || !workspace.focusWindowUnderPointer(window)) {
@@ -2854,6 +3119,7 @@ export class HybridWindowManager {
     preferredOutput?: string,
   ): ManagedWindowRect {
     const rect = window.state[WINDOW_STATE_RECT]();
+    if (window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()) return allOutputsRect(rect);
     const centerX = read(rect.x) + read(rect.width) / 2;
     const centerY = read(rect.y) + read(rect.height) / 2;
     const outputName =
@@ -2874,13 +3140,31 @@ export class HybridWindowManager {
     return rect;
   }
 
-  public onWindowFullscreenRequest(event: WindowFullscreenRequestEvent, withChrome = false) {
+  public onWindowFullscreenRequest(event: WindowFullscreenRequestEvent, withChrome = false, allOutputs = false) {
     if (this.isGrabbing) {
       return;
     }
     const window = event.window;
     const workspace = this.findWorkspaceForWindow(window);
+    console.info("fullscreen-transition", JSON.stringify({
+      windowId: window.id,
+      source: event.source,
+      requestedFullscreen: event.fullscreen,
+      requestedWithChrome: withChrome,
+      requestedAllOutputs: allOutputs,
+      requestedOutput: event.outputName,
+      workspace: workspace ? { monitor: workspace.monitor, index: workspace.index } : null,
+      nativeFullscreen: window.isFullscreen.peek(),
+      fullscreen: window.state[WINDOW_STATE_FULLSCREEN](),
+      fullscreenWithChrome: window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME](),
+      clientRect: window.position,
+      nativeRect: window.rect,
+      managedRect: snapshotManagedRect(window.state[WINDOW_STATE_RECT]()),
+      decoration: window.decoration.peek(),
+    }));
     window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(event.fullscreen && withChrome);
+    window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS].set(event.fullscreen && allOutputs);
+    workspace?.syncWindowVisibleOutputs(window);
     markWindowCompositionDirty(window);
     window.state[WINDOW_STATE_MINIMIZED].set(false);
     this.clearWindowSnapState(window);
@@ -2899,7 +3183,7 @@ export class HybridWindowManager {
       // A window that was (or became) maximized while fullscreen goes back
       // to the maximized rect, not to the rect it had before maximizing.
       const targetRect = window.state[WINDOW_STATE_MAXIMIZED]()
-        ? this.maximizedRectForWindow(window)
+        ? this.maximizedRectForWindow(window, workspace?.monitor)
         : restoreRect;
       if (targetRect) {
         workspace?.syncFloatingWindowRect(window, targetRect);
@@ -3678,7 +3962,7 @@ export class Workspace {
       this.moveTileWindowToIndex(window, tileInsertionIndex);
     }
     const isTileableInCurrentMode = !this.isTiled || this.shouldTile(window);
-    if (!restored && isTileableInCurrentMode) {
+    if (!restored && isTileableInCurrentMode && !isMateEngineWindow(window)) {
       this.activeWindowId = window.id;
     }
     if (restored) {
@@ -3692,6 +3976,7 @@ export class Workspace {
         windowIds: this.windows.map((window) => window.id),
       });
       this.restoredWindowStateById.delete(window.id);
+      window.state[WINDOW_STATE_PINNED].set(restored.pinned ?? false);
       window.state[WINDOW_STATE_FLOATING_RECT].set(
         restored.floatingRect ?? null,
       );
@@ -3700,7 +3985,8 @@ export class Workspace {
       );
       window.state[WINDOW_STATE_RESTORE_RECT].set(restored.restoreRect ?? null);
       window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME].set(restored.fullscreenWithChrome ?? false);
-      if (restored.fullscreenWithChrome) {
+      window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS].set(restored.fullscreenAllOutputs ?? false);
+      if (restored.fullscreenWithChrome || restored.fullscreenAllOutputs) {
         window.state[WINDOW_STATE_FULLSCREEN].set(true);
         window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(restored.fullscreenRestoreRect ?? null);
       }
@@ -3723,7 +4009,7 @@ export class Workspace {
       return restored !== undefined;
     }
 
-    if (restored?.fullscreenWithChrome) {
+    if (restored?.fullscreenWithChrome || restored?.fullscreenAllOutputs) {
       window.state[WINDOW_STATE_RECT].set(this.fullscreenRootRect(window));
     } else if (restored && !this.isTiled) {
       window.state[WINDOW_STATE_RECT].set(
@@ -3993,6 +4279,9 @@ export class Workspace {
     }
 
     for (const window of this.windows) {
+      // Its transparent client may extend above the monitor while the body
+      // sits on a ledge. Layer updates must not push that client under the bar.
+      if (isMateEngineWindow(window)) continue;
       // Fullscreen owns the whole output even when the client is also maximized.
       if (window.state[WINDOW_STATE_FULLSCREEN]()) {
         continue;
@@ -4414,12 +4703,18 @@ export class Workspace {
     window.state[WINDOW_STATE_RECT].set(rect);
   }
 
-  public adoptFloatingWindow(window: WaylandWindow, rect: ManagedWindowRect) {
+  public adoptFloatingWindow(
+    window: WaylandWindow,
+    rect: ManagedWindowRect,
+    keepActiveWindow = false,
+  ) {
     if (!this.hasWindow(window)) {
       this.windows.push(window);
     }
     const visible = this.isActive();
-    this.activeWindowId = window.id;
+    if (!keepActiveWindow) {
+      this.activeWindowId = window.id;
+    }
     this.syncWindowVisibleOutputs(window);
     resetWorkspaceVisualState(window, visible);
     window.state[WINDOW_STATE_FLOATING_RECT].set(
@@ -4497,6 +4792,8 @@ export class Workspace {
     window: WaylandWindow,
   ): WaylandWindow | undefined {
     if (
+      !this.isTiled ||
+      /^(?:org\.telegram\.desktop(?:[._]|$)|TelegramDesktop$)/i.test(window.appId() ?? "") ||
       !this.hasWindow(window) ||
       window.state[WINDOW_STATE_MINIMIZED]()
     ) {
@@ -4507,7 +4804,7 @@ export class Workspace {
     if (
       focused &&
       focused.id !== window.id &&
-      this.areTransientRelatives(focused, window)
+      (isPortalDialogWindow(focused) || this.areTransientRelatives(focused, window))
     ) {
       return undefined;
     }
@@ -4891,7 +5188,9 @@ export class Workspace {
     const active = this.windows.find(
       (window) => window.id === this.activeWindowId,
     );
-    active?.focus();
+    if (active && !isMateEngineWindow(active)) {
+      active.focus();
+    }
   }
 
   public shouldTile(window: WaylandWindow): boolean {
@@ -5002,6 +5301,7 @@ export class Workspace {
     const fullscreenRestoreRect = window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT]();
     return {
       id: window.id,
+      pinned: window.state[WINDOW_STATE_PINNED](),
       tileWidth: this.tileWidthByWindowId.get(window.id),
       floatingRect: this.isTiled
         ? window.state[WINDOW_STATE_FLOATING_RECT]()
@@ -5009,6 +5309,7 @@ export class Workspace {
       floatingMaximized: window.state[WINDOW_STATE_FLOATING_MAXIMIZED](),
       restoreRect: window.state[WINDOW_STATE_RESTORE_RECT](),
       fullscreenWithChrome: window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME](),
+      fullscreenAllOutputs: window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS](),
       fullscreenRestoreRect: fullscreenRestoreRect ? snapshotManagedRect(fullscreenRestoreRect) : null,
       snapZone: window.state[WINDOW_STATE_SNAP_ZONE](),
       snapMonitor: window.state[WINDOW_STATE_SNAP_MONITOR](),
@@ -5017,13 +5318,13 @@ export class Workspace {
     };
   }
 
-  private syncWindowVisibleOutputs(window: WaylandWindow) {
+  public syncWindowVisibleOutputs(window: WaylandWindow) {
     window.state[WINDOW_STATE_WORKSPACE_TILED].set(this.isTiled);
     window.state[WINDOW_STATE_TILED].set(
       this.isTiled && this.shouldTile(window),
     );
     window.state[WINDOW_STATE_VISIBLE_OUTPUTS].set(
-      this.isTiled ? [this.monitor] : null,
+      this.isTiled && !isMateEngineWindow(window) && !window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]() ? [this.monitor] : null,
     );
   }
 
@@ -5205,6 +5506,12 @@ export class Workspace {
     immediateWindowIds?: ReadonlySet<string>,
   ) {
     for (const window of this.floatingWindows()) {
+      // Seating/drag owns this geometry, including negative client origins.
+      // Preserve it through ordinary window and layer layout recalculations.
+      if (isMateEngineWindow(window)) {
+        this.syncFloatingWindowRect(window, window.state[WINDOW_STATE_RECT]());
+        continue;
+      }
       // A maximized window's rect is owned by the maximize flow. Rolling it
       // back to FLOATING_RECT here could hit a degenerate rect (same reason
       // as in setTiled(false)).
@@ -5260,6 +5567,14 @@ export class Workspace {
 
     let width = read(sizeRect.width);
     let height = read(sizeRect.height);
+    if (isSteamNotificationWindow(window)) {
+      return {
+        x: logicalX + Math.max(0, logicalWidth - width - TILE_MARGIN),
+        y: logicalY + Math.max(0, logicalHeight - height - TILE_MARGIN),
+        width,
+        height,
+      };
+    }
     // Reading the natural size while the client geometry is still unsettled
     // (≈0, e.g. right after the first commit) yields a degenerate rect that
     // is nothing but the SSD frame. Freezing that as the floating restore
@@ -5476,6 +5791,9 @@ export class Workspace {
   }
 
   private fullscreenRootRect(window: WaylandWindow): ManagedWindowRect {
+    if (window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()) {
+      return allOutputsRect(window.state[WINDOW_STATE_RECT]());
+    }
     const monitor = COMPOSITOR.output.current[this.monitor];
     if (monitor?.resolution) {
       return {
@@ -5487,6 +5805,21 @@ export class Workspace {
     }
     return window.state[WINDOW_STATE_RECT]();
   }
+}
+
+function allOutputsRect(fallback: ManagedWindowRect): ManagedWindowRect {
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const name of COMPOSITOR.output.list) {
+    const output = COMPOSITOR.output.current[name];
+    if (!output?.resolution) continue;
+    left = Math.min(left, output.position.x);
+    top = Math.min(top, output.position.y);
+    right = Math.max(right, output.position.x + output.resolution.width / output.scale);
+    bottom = Math.max(bottom, output.position.y + output.resolution.height / output.scale);
+  }
+  return Number.isFinite(left)
+    ? { x: left, y: top, width: right - left, height: bottom - top }
+    : fallback;
 }
 
 function workspaceKey(monitor: string, index: number): string {

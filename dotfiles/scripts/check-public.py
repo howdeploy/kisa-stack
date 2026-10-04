@@ -17,6 +17,12 @@ RULES = {
 }
 DISALLOWED = re.compile(r"(?:^|/)(?:auth\.json|hosts\.yml|integrations\.env|wallpapers\.json|\.env(?:\.[^/]+)?|.*\.(?:sqlite3?|db|log|pem|key|qsb|pyc)|.*(?:\.bak|\.backup).*)(?:$|/)")
 BINARY = {"dotfiles/config/shoji-shell/assets/panel-grain.png", "dotfiles/config/walker/themes/shoji/grain.png"}
+# Reviewed generated sprite sheets used by HomeMascots.js; no screenshots.
+BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v2/{digit}.png" for digit in range(10))
+BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v3/{digit}.png" for digit in (0, 2, 4, 9))
+BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v4/{digit}.png" for digit in (3, 6, 7, 8))
+BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v5/{variant}{digit}.png"
+              for variant in "bcd" for digit in range(10))
 
 
 def main():

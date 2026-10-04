@@ -11,6 +11,9 @@ third-party material. Modified upstream code retains its upstream terms.
 | Dock/Media QML ancestry | [bea4dev/shoji-bar-3](https://github.com/bea4dev/shoji-bar-3/tree/1f9ca9309e6dbdec0a785bd6a86926a6406b4171); adapted `Dock.qml` and `Media.qml`. No standalone upstream LICENSE was found during packaging; no new license grant for the upstream portions is asserted here. |
 | Control icons | Lucide, ISC; exact source revision and license beside the SVGs in both icon directories |
 | Session icons | Lobe Icons, MIT; source links and license in `config/shoji-shell/icons/` |
+| Provider icons | LobeHub, MIT; retained `config/shoji-shell/icons/provider-icons-LICENSE` |
+| Home clock mascots | Locally generated pixel-art sprite sheets, shared as clock-widget artwork; no MateEngine models or screenshots |
+| MateEngine fallback icon | Original neutral SVG, not copied Steam artwork |
 | AI limits protocol adaptation | howdeploy/CanvasTTY, MIT notice retained in `ai-limits.mjs` |
 | Palette | [Catppuccin Mocha](https://catppuccin.com/palette/) color values |
 | App icon theme | Papirus installed separately; only a small inheritance index is distributed here |
@@ -20,6 +23,6 @@ application icon handling and footer/focus behavior. Building the patched launch
 produces a GPL-covered application; retain its corresponding source and notices
 when redistributing binaries. No Walker or compositor binary is shipped here.
 
-The two grain PNGs are generated visual texture assets, not desktop screenshots.
+The two grain PNGs and the clock sprite sheets are generated visual assets, not desktop screenshots.
 The fallback wallpaper is a newly written SVG. Personal wallpaper images, music,
 fonts, cursor artwork and application-brand icon packs are not redistributed.

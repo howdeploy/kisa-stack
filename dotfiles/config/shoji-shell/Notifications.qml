@@ -6,9 +6,26 @@ import Quickshell.Services.Notifications
 Singleton {
     id: root
     property bool quiet: false
+    property bool clearing: false
     property var toast: null
-    readonly property var items: server.trackedNotifications.values
+    readonly property int historyLimit: 30
+    readonly property var items: clearing ? [] : server.trackedNotifications.values
     readonly property int count: items.length
+    function isBlocked(notification) {
+        return [notification.appName, notification.desktopEntry].some(value =>
+            /^(org\.flameshot\.)?flameshot(?:\.desktop)?$/i.test((value || "").trim()));
+    }
+    function trackNotification(notification) {
+        if (isBlocked(notification)) {
+            notification.tracked = false;
+            return false;
+        }
+        // Make room before the server appends the new notification.
+        for (const item of items.slice(0, Math.max(0, items.length - historyLimit + 1)))
+            item.expire();
+        notification.tracked = true;
+        return true;
+    }
     NotificationServer {
         id: server
         keepOnReload: true
@@ -18,8 +35,8 @@ Singleton {
         imageSupported: true
         persistenceSupported: true
         onNotification: notification => {
-            notification.tracked = true;
-            if (!root.quiet) {
+            if (!root.trackNotification(notification)) return;
+            if (!root.quiet && !notification.lastGeneration) {
                 root.toast = notification;
                 expiry.interval = notification.expireTimeout > 0 ? notification.expireTimeout : 6000;
                 expiry.restart();
@@ -35,7 +52,11 @@ Singleton {
     }
     onQuietChanged: { if (quiet) toast = null; }
     function clearAll() {
+        const pending = items.slice();
         toast = null;
-        for (const item of items.slice()) item.dismiss();
+        expiry.stop();
+        clearing = true;
+        for (const item of pending) item.dismiss();
+        clearing = false;
     }
 }

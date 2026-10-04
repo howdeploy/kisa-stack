@@ -1,8 +1,8 @@
 # Working on these dotfiles
 
 Read `README.md`, then the relevant page in `docs/`. `sources.json` pins the public
-source dependencies. The expected compositor is howdeploy/ShojiWM's integration
-branch, not fork `main` or an arbitrary upstream build.
+source dependencies. The expected compositor is howdeploy/ShojiWM's pinned
+desktop snapshot branch, not fork `main` or an arbitrary upstream build.
 
 - Keep publication source and installed configuration separate. Ask which is the
   target if the user's request is unclear; do not silently modify both.
@@ -12,7 +12,7 @@ branch, not fork `main` or an arbitrary upstream build.
   Do not enable an account integration simply because a local CLI is authenticated.
 - Do not put API keys/passwords in app launch arguments, examples, fixtures or
   Git history. Use the installing user's CLI credential stores after authorization.
-- Preserve the three preset sets and the empty preset first. A layout change can
+- Preserve the existing preset sets and the empty preset first. A layout change can
   alter membership as well as position. Wallpaper and preset selections apply together.
 - Before changing animations, follow events, capture lifetime, progress, visibility
   and input. Keep outgoing widget snapshots and CSD/SSD/fullscreen behavior intact.

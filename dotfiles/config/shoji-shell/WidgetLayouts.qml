@@ -8,14 +8,23 @@ Singleton {
     property string primaryOutputName: Settings.primaryOutput
     readonly property var primaryOutput: Quickshell.screens.find(s => s.name === primaryOutputName)
         || Quickshell.screens[0] || null
+    readonly property var rightOutput: Quickshell.screens.reduce((right, screen) =>
+        !right || screen.x > right.x ? screen : right, null)
     // Each entry owns its output and edge offsets. Add future arrangements here.
     readonly property var configuredLayouts: [
         { id: "empty", name: "Без виджетов", widgets: {} },
+        { id: "home-zone", name: "Home Zone", widgets: {
+            home: { output: "primary", horizontal: "center", vertical: "center", x: 0, y: 0 }
+        } },
+        { id: "gaming-home-zone", name: "Home Zone · Gaming", widgets: {
+            "gaming-home": { output: "right", horizontal: "center", vertical: "center", x: 0, y: 0 }
+        } },
         { id: "default", name: "Текущая раскладка", widgets: {
             limits: { output: "primary", horizontal: "left", vertical: "top", x: 16, y: 68 },
             sessions: { output: "primary", horizontal: "left", vertical: "center", x: 16, y: 0 },
             neko: { output: "primary", horizontal: "right", vertical: "bottom", x: 314, y: 16 },
             github: { output: "primary", horizontal: "right", vertical: "top", x: 16, y: 68 },
+            profile: { output: "primary", horizontal: "right", vertical: "center", x: 16, y: 0 },
             hermes: { output: "primary", horizontal: "center", vertical: "top", x: 0, y: 68 },
             vast: { output: "primary", horizontal: "left", vertical: "bottom", x: 16, y: 16 },
             music: { output: "primary", horizontal: "right", vertical: "bottom", x: 16, y: 16 }
@@ -72,11 +81,13 @@ Singleton {
         return Object.prototype.hasOwnProperty.call(selected.widgets, id)
             ? selected.widgets[id] : hiddenPlacement;
     }
+    function screenFor(reference) {
+        if (reference === "primary") return primaryOutput;
+        if (reference === "right") return rightOutput;
+        return Quickshell.screens.find(screen => screen.name === reference) || null;
+    }
     function outputFor(id, layoutId) {
-        const entry = placement(id, layoutId);
-        if (!entry.output) return null;
-        return entry.output === "primary" ? primaryOutput
-            : Quickshell.screens.find(s => s.name === entry.output) || null;
+        return screenFor(placement(id, layoutId).output);
     }
     function enabledOn(id, output, layoutId) {
         if (!Settings.enabled(id)) return false;

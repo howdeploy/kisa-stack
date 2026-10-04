@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+directory="$(xdg-user-dir PICTURES)/Скриншоты"
+mkdir -p -- "$directory"
+screenshot="$directory/desktop-$(date +%Y%m%d-%H%M%S-%N).png"
+grim "$screenshot"
+wl-copy --type image/png < "$screenshot"

@@ -33,7 +33,7 @@ linking live state into Git.
 
 ## Compositor contract
 
-The pinned fork is https://github.com/howdeploy/ShojiWM on `howdeploy/stack`,
+The pinned fork is https://github.com/howdeploy/ShojiWM on `howdeploy/desktop-20261004`,
 revision recorded in `dotfiles/sources.json`. Fork `main` is not the integration
 branch. Contributions include keyboard layout status/LEDs, cursor scaling,
 full-window subsurfaces and native workspace waves; `dotfiles/docs/fork.md` links

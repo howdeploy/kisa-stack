@@ -18,15 +18,17 @@ Loader {
     x: WidgetLayouts.horizontalPosition(placement, output.width, width)
     y: WidgetLayouts.verticalPosition(placement, output.height, height)
     active: Wallpapers.ready && transition.hasWallpaper && fits && (beforeVisible || afterVisible)
-    enabled: !transition.preparing && !layer.enabled
-    layer.enabled: transition.transitioning && (beforeVisible !== afterVisible || relocating)
+    enabled: !LiveWallpapers.busy && !transition.preparing
+        && !(transition.transitioning && (beforeVisible !== afterVisible || relocating))
+    layer.enabled: transition.transitioning || LiveWallpapers.busy
     layer.effect: WidgetWaveMask {
-        viewportSize: Qt.size(root.output.width, root.output.height)
-        widgetOrigin: Qt.vector2d(root.x, root.y)
+        transitionContext: root.transition
+        screenSize: Qt.size(root.output.width, root.output.height)
+        localOrigin: Qt.vector2d(root.x, root.y)
         widgetSize: Qt.size(root.width, root.height)
-        progress: root.transition.progress
-        beforeVisible: root.beforeVisible && !root.relocating ? 1 : 0
-        afterVisible: root.afterVisible ? 1 : 0
+        localProgress: root.transition.progress
+        localBefore: root.beforeVisible && !root.relocating ? 1 : 0
+        localAfter: root.afterVisible ? 1 : 0
     }
     WidgetWaveSnapshot {
         id: outgoing
