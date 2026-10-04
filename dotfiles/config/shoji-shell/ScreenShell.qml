@@ -120,7 +120,8 @@ Scope {
         }
         Rectangle {
             id: workspacePill
-            x: 16; y: 12; height: 34; radius: 17
+            x: 16; anchors.verticalCenter: parent.verticalCenter
+            height: 34; radius: 17
             width: workspaceRow.width + 16
             color: Theme.surface
             Row {
@@ -152,8 +153,8 @@ Scope {
         }
         Rectangle {
             id: clockPill
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: 12; width: timeText.implicitWidth + 32; height: 34; radius: 17
+            anchors { horizontalCenter: parent.horizontalCenter; verticalCenter: parent.verticalCenter }
+            width: timeText.implicitWidth + 32; height: 34; radius: 17
             color: Theme.surface
             TapHandler { onTapped: screenShell.shell.panelPage = "" }
             UiText {
@@ -165,18 +166,21 @@ Scope {
         Row {
             id: rightPills
             anchors.right: parent.right; anchors.rightMargin: 16
-            y: 12; spacing: 8
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 8
             ActionButton {
                 id: notificationButton
                 hint: "Уведомления: " + Notifications.count + (Notifications.quiet ? " · Не беспокоить" : "")
                 height: 34
+                topPadding: 7; bottomPadding: 7
                 highlighted: screenShell.panelOpen && screenShell.shell.panelPage === "notifications"
                 contentItem: RowLayout {
                     spacing: 7
-                    PanelIcon { name: Notifications.quiet ? "bell-off" : "bell"; implicitWidth: 17; implicitHeight: 17; tint: notificationButton.highlighted ? Theme.surface : Theme.ink }
+                    PanelIcon { name: Notifications.quiet ? "bell-off" : "bell"; implicitWidth: 17; implicitHeight: 17; Layout.alignment: Qt.AlignVCenter; tint: notificationButton.highlighted ? Theme.surface : Theme.ink }
                     Rectangle {
                         visible: Notifications.count > 0
                         implicitWidth: Math.max(18, notificationCount.implicitWidth + 8); implicitHeight: 18; radius: 9
+                        Layout.alignment: Qt.AlignVCenter
                         color: notificationButton.highlighted ? Theme.surface : Theme.accent
                         UiText { id: notificationCount; anchors.centerIn: parent; text: Notifications.count > 99 ? "99+" : Notifications.count; font.pixelSize: 10; font.weight: Font.DemiBold; color: notificationButton.highlighted ? Theme.accent : Theme.surface }
                     }
@@ -188,18 +192,20 @@ Scope {
                 id: systemButton
                 hint: Services.wifiLabel + "\nBluetooth: " + Services.btLabel + "\n" + (Services.muted ? "Звук выключен" : "Громкость: " + Services.volume + "%") + (Keyboard.available ? "\nРаскладка: " + Keyboard.label : "")
                 height: 34
+                topPadding: 7; bottomPadding: 7
                 highlighted: screenShell.panelOpen && screenShell.shell.panelPage === "controls"
                 contentItem: RowLayout {
                     spacing: 10
-                    PanelIcon { name: Services.wifiIcon; implicitWidth: 17; implicitHeight: 17; tint: systemButton.highlighted ? Theme.surface : Services.network ? Theme.accent : Theme.muted }
-                    PanelIcon { name: Services.bluetoothIcon; implicitWidth: 16; implicitHeight: 16; tint: systemButton.highlighted ? Theme.surface : Services.bluetoothConnected.length > 0 ? Theme.accent : Theme.muted }
+                    PanelIcon { name: Services.wifiIcon; implicitWidth: 17; implicitHeight: 17; Layout.alignment: Qt.AlignVCenter; tint: systemButton.highlighted ? Theme.surface : Services.network ? Theme.accent : Theme.muted }
+                    PanelIcon { name: Services.bluetoothIcon; implicitWidth: 16; implicitHeight: 16; Layout.alignment: Qt.AlignVCenter; tint: systemButton.highlighted ? Theme.surface : Services.bluetoothConnected.length > 0 ? Theme.accent : Theme.muted }
                     RowLayout {
                         spacing: 5
-                        PanelIcon { name: Services.muted ? "muted" : "volume"; implicitWidth: 16; implicitHeight: 16; tint: systemButton.highlighted ? Theme.surface : Theme.ink }
-                        UiText { text: Services.muted ? "Выкл" : Services.volume + "%"; font.pixelSize: 11; color: systemButton.highlighted ? Theme.surface : Theme.ink }
+                        Layout.alignment: Qt.AlignVCenter
+                        PanelIcon { name: Services.muted ? "muted" : "volume"; implicitWidth: 16; implicitHeight: 16; Layout.alignment: Qt.AlignVCenter; tint: systemButton.highlighted ? Theme.surface : Theme.ink }
+                        UiText { text: Services.muted ? "Выкл" : Services.volume + "%"; font.pixelSize: 11; Layout.alignment: Qt.AlignVCenter; color: systemButton.highlighted ? Theme.surface : Theme.ink }
                     }
-                    Rectangle { visible: Keyboard.available; implicitWidth: 1; implicitHeight: 14; color: systemButton.highlighted ? Theme.surface : Theme.line }
-                    UiText { visible: Keyboard.available; text: Keyboard.shortName; font.pixelSize: 11; font.weight: Font.DemiBold; color: systemButton.highlighted ? Theme.surface : Theme.ink }
+                    Rectangle { visible: Keyboard.available; implicitWidth: 1; implicitHeight: 14; Layout.alignment: Qt.AlignVCenter; color: systemButton.highlighted ? Theme.surface : Theme.line }
+                    UiText { visible: Keyboard.available; text: Keyboard.shortName; font.pixelSize: 11; font.weight: Font.DemiBold; Layout.alignment: Qt.AlignVCenter; color: systemButton.highlighted ? Theme.surface : Theme.ink }
                 }
                 background: Rectangle { radius: 17; color: systemButton.highlighted ? Theme.accent : systemButton.hovered ? Theme.hover : Theme.surface }
                 onClicked: screenShell.shell.toggle(screenShell.output.name, "controls")
@@ -409,13 +415,15 @@ Scope {
                         RowLayout {
                             visible: popup.displayedPage === "controls" && SystemTray.items.values.length > 0
                             Layout.fillWidth: true
-                            UiText { text: "В трее"; color: Theme.muted; font.pixelSize: 11 }
+                            UiText { text: "В трее"; color: Theme.muted; font.pixelSize: 11; Layout.alignment: Qt.AlignVCenter }
                             Repeater {
                                 model: SystemTray.items
                                 ActionButton {
                                     id: trayButton
                                     required property var modelData
                                     property bool quitRequested: false
+                                    Layout.alignment: Qt.AlignVCenter
+                                    topPadding: 8; bottomPadding: 8
                                     hint: modelData.title || modelData.id
                                     icon.source: modelData.icon; icon.color: "transparent"
                                     function showMenu() {
