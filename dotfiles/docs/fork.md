@@ -2,11 +2,11 @@
 
 ## Current desktop snapshot (2026-10-04)
 
-Use `howdeploy/desktop-20261004` at
-[`2c767129e5a900310b4d53df9f5952a30f6b5953`](https://github.com/howdeploy/ShojiWM/commit/2c767129e5a900310b4d53df9f5952a30f6b5953).
+Use `main` at
+[`dcb73aa3165e1fb66fca8226f076f3183e38806c`](https://github.com/howdeploy/ShojiWM/commit/dcb73aa3165e1fb66fca8226f076f3183e38806c).
 This snapshot preserves the installed compositor source, including generic
 output overlays, reload/cache fixes, same-user logout and MateEngine policies.
-Read its [snapshot notes](https://github.com/howdeploy/ShojiWM/blob/2c767129e5a900310b4d53df9f5952a30f6b5953/DESKTOP-SNAPSHOT.md)
+Read its [snapshot notes](https://github.com/howdeploy/ShojiWM/blob/dcb73aa3165e1fb66fca8226f076f3183e38806c/DESKTOP-SNAPSHOT.md)
 for the distinction between generic fixes and local pet/dock rules.
 
 The generic shaped-window input fix is submitted separately in

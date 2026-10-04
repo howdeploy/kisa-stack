@@ -2,7 +2,8 @@
 
 Read `README.md`, then the relevant page in `docs/`. `sources.json` pins the public
 source dependencies. The expected compositor is howdeploy/ShojiWM's pinned
-desktop snapshot branch, not fork `main` or an arbitrary upstream build.
+`main` revision, not an arbitrary upstream build. The dated desktop branch is
+an archival snapshot.
 
 - Keep publication source and installed configuration separate. Ask which is the
   target if the user's request is unclear; do not silently modify both.

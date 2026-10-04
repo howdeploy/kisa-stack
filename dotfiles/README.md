@@ -6,8 +6,8 @@ This directory contains the configuration sources, installation tools and a map
 of how the parts fit together. It is a sanitized source distribution, not a disk
 image or a backup of the author's home directory.
 
-**Use the [howdeploy/ShojiWM fork](https://github.com/howdeploy/ShojiWM/tree/howdeploy/desktop-20261004),
-branch `howdeploy/desktop-20261004`, at the revision in [sources.json](sources.json).** The
+**Use the [howdeploy/ShojiWM fork](https://github.com/howdeploy/ShojiWM/tree/main),
+branch `main`, at the revision in [sources.json](sources.json).** The
 configuration depends on fixes and APIs contributed by howdeploy. Fork `main`
 does not include them. See [fork and PR provenance](docs/fork.md).
 
