@@ -13,8 +13,8 @@ Review it before installing; it includes optional tools used by panel buttons.
 On Arch/Manjaro, after updating your system normally:
 
 ```bash
-git clone https://github.com/howdeploy/kisa-stack.git
-cd kisa-stack
+git clone https://github.com/tab11pm/tab-stack.git
+cd tab-stack
 grep -v '^#' dotfiles/dependencies/arch.txt | xargs sudo pacman -S --needed
 rustup toolchain install 1.94.0
 ```
@@ -37,7 +37,7 @@ Arch package names or KDE polkit executable path to be universal.
 
 ## 1. Build and install the compositor fork
 
-From the `kisa-stack` repository root:
+From the `tab-stack` repository root:
 
 ```bash
 ./dotfiles/scripts/build-shojiwm.sh
@@ -60,7 +60,7 @@ Do not run the user installer below with sudo.
 ## 2. Build the launcher and Qt shaders
 
 ```bash
-# Back in the kisa-stack root:
+# Back in the tab-stack root:
 ./dotfiles/scripts/build-walker.sh
 ./dotfiles/scripts/build-shaders.sh
 ```
@@ -93,7 +93,8 @@ it does not symlink your live configs into the checkout. It creates the required
 and Ghostty paths only in the installed copies.
 
 Existing component directories are moved to a private backup beneath
-`$XDG_STATE_HOME/kisa-dotfiles/backups/` (default `~/.local/state`). The printed
+`$XDG_STATE_HOME/tab-stack/backups/` (default `~/.local/state`). Existing backups
+from the original installer remain in its previous directory. The printed
 `manifest.json` maps every target to its backup. Upgrades preserve an existing
 shell `integrations.env` and `wallpapers.json`; review those local files yourself.
 Other local component changes remain in the backup, not merged into the new copy.

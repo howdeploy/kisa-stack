@@ -1,6 +1,10 @@
-# KISA Stack [![Awesome](https://awesome.re/badge.svg)](https://awesome.re)
+# tab-stack
 
-Личный сетап для вайбкодинга: продуманная система поведения AI-ассистентов, скиллы, хуки и плагины. Все, что я реально гоняю каждый день — в виде, который можно развернуть у себя за пять минут.
+Наш стек рабочего стола и инструментов для разработки: ShojiWM, Quickshell, Walker, скиллы, хуки и конфигурация AI-ассистентов. Репозиторий — [tab11pm/tab-stack](https://github.com/tab11pm/tab-stack).
+
+Стек развивается под наш сетап. Уже добавлена собственная блокировка экрана на Quickshell: `Super+L`, кнопка в профиле, системная проверка пароля и синхронизация ввода между мониторами. Автоблокировка пока не включена.
+
+Основа — [howdeploy/kisa-stack](https://github.com/howdeploy/kisa-stack). Авторские и лицензионные уведомления исходного проекта сохранены.
 
 Каждый артефакт совместим сразу с тремя рантаймами: **Claude Code**, **Codex CLI** и **Hermes**.
 
@@ -58,7 +62,7 @@
 
 ### Система и железо
 
-- [shojiwm](skills/shojiwm) — configure the KISA desktop and understand its compositor, shell and launcher.
+- [shojiwm](skills/shojiwm) — configure the tab-stack desktop and understand its compositor, shell and launcher.
 - [shoji-shaders](skills/shoji-shaders) — create ShojiWM and Quickshell effects from visual references.
 
 - [wine-hid-device-tools](skills/wine-hid-device-tools) - Запуск Windows-утилит для HID-клавиатур под Wine/PortProton/Bottles: диагностика hidraw, udev-правила, winebus-реестр — вместо «ставь виртуалку».
@@ -69,7 +73,7 @@
 
 ## Плагины
 
-Мой набор плагинов Claude Code со ссылками, описаниями и шпаргалкой по установке — в [plugins.md](plugins.md). Там же — наборы и тулзы вне маркетплейса (gstack, gsd-core, rtk, Agentation, Remotion, мой пайплайн [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave)), «фразы кабанчика» и мой [MTGA](https://github.com/howdeploy/MTGA) (Claude отвечает как трамповские твиты, TREMENDOUS!).
+Каталог плагинов, унаследованный от исходного проекта, — в [plugins.md](plugins.md). Установка и подключения настраиваются отдельно под наш сетап.
 
 ## Установка
 
@@ -101,4 +105,4 @@
 
 ## Contributing
 
-Это подборка моего личного сетапа для моей аудитории. Нашли проблему или хотите предложить улучшение — открывайте issue.
+Развиваем стек под свои задачи. Ошибки и предложения — в [issues tab-stack](https://github.com/tab11pm/tab-stack/issues).

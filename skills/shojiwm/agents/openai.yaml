@@ -1,4 +1,4 @@
 interface:
-  display_name: "ShojiWM Desktop"
-  short_description: "Configure the KISA ShojiWM desktop stack"
+  display_name: "tab-stack Desktop"
+  short_description: "Configure the tab-stack ShojiWM desktop"
   default_prompt: "Use $shojiwm to understand and update my desktop configuration."

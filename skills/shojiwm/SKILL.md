@@ -1,23 +1,23 @@
 ---
 name: shojiwm
-description: Configure and troubleshoot the KISA ShojiWM desktop, including TSX window management, Quickshell panels, widget presets, Walker and installation. Use for ShojiWM desktop work; not for unrelated window managers or virtual machines.
+description: Configure and troubleshoot the tab-stack ShojiWM desktop, including TSX window management, Quickshell panels, widget presets, Walker and installation. Use for ShojiWM desktop work; not for unrelated window managers or virtual machines.
 metadata:
   hermes:
     tags: [desktop, linux, wayland]
 ---
 
-# KISA ShojiWM desktop
+# tab-stack ShojiWM desktop
 
-Locate the user's installed config and/or the `howdeploy/kisa-stack` checkout
+Locate the user's installed config and/or the `tab11pm/tab-stack` checkout
 before changing files. Public reference:
-https://github.com/howdeploy/kisa-stack/tree/main/dotfiles . Read its `README.md`,
+https://github.com/tab11pm/tab-stack/tree/main/dotfiles . Read its `README.md`,
 `AGENTS.md`, `sources.json` and the docs relevant to the request. This skill does
 not require the author's filesystem, Wiki, accounts or other installed skills.
 
 ## Source map
 
 Installed files are under `${XDG_CONFIG_HOME:-$HOME/.config}`; published sources
-are under `dotfiles/config/` in kisa-stack. Installation copies them, rather than
+are under `dotfiles/config/` in tab-stack. Installation copies them, rather than
 linking live state into Git.
 
 | Concern | Relative path under the config root |

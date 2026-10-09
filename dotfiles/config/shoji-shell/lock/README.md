@@ -56,12 +56,13 @@ to another TTY with Ctrl+Alt+F3 and log in. Save work where possible before endi
 the affected graphical session using `loginctl terminate-session SESSION_ID`.
 Restarting Quickshell is not assumed to recover an orphaned lock.
 
-## Move into your fork
+## Files in tab-stack
 
-Copy `lock/`, `lock.qml`, `lock-preview.qml`, `lock-check.qml`, `lock-input-test.qml`, `LockScreen.qml`,
-`icons/home-lock.svg` and the changes in `qmldir`,
-`shell.qml`, `HomeSystemCard.qml` and `shojiwm/src/index.tsx` into the corresponding
-`dotfiles/config/` paths. Keep `Theme.qml`, `UiText.qml`, `ActionButton.qml` and
+The locker is part of `tab11pm/tab-stack` under `dotfiles/config/shoji-shell/`:
+`lock/`, `lock.qml`, `lock-preview.qml`, `lock-check.qml`, `lock-input-test.qml`,
+`LockScreen.qml` and `icons/home-lock.svg`. It integrates through `qmldir`,
+`shell.qml`, `HomeSystemCard.qml` and `shojiwm/src/index.tsx`.
+Keep `Theme.qml`, `UiText.qml`, `ActionButton.qml` and
 `assets/default-wallpaper.svg` with the shell. No username, credential, private
 wallpaper or absolute home path is embedded in the implementation.
 

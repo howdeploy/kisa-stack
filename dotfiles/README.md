@@ -1,4 +1,9 @@
-# KISA desktop dotfiles
+# tab-stack desktop dotfiles
+
+Desktop configuration maintained in [tab11pm/tab-stack](https://github.com/tab11pm/tab-stack),
+derived from [howdeploy/kisa-stack](https://github.com/howdeploy/kisa-stack).
+This fork adds a custom Quickshell session lock with shared password entry across
+outputs. See [the locker guide](config/shoji-shell/lock/README.md).
 
 A ShojiWM desktop with a Quickshell panel and dock, a customized Walker launcher,
 Catppuccin Mocha colors, animated wallpaper/widget presets, and GPU window effects.

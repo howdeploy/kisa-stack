@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix="kisa-dotfiles-check-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tab-stack-check-") as directory:
         home = Path(directory) / "desktop user"
         home.mkdir()
         args = [sys.executable, str(ROOT / "scripts/install.py"), "--target-home", str(home)]
@@ -27,7 +27,7 @@ def main():
         user_file.write_text("preserve in backup\n")
         subprocess.run([*args, "--apply"], check=True, capture_output=True)
         assert "local setting" in local.read_text()
-        manifests = list(home.glob(".local/state/kisa-dotfiles/backups/*/manifest.json"))
+        manifests = list(home.glob(".local/state/tab-stack/backups/*/manifest.json"))
         assert len(manifests) == 2
         backed_up = [Path(e["backup"]) for m in manifests for e in json.loads(m.read_text()) if e["backup"]]
         assert any((p / "user-note").is_file() for p in backed_up)

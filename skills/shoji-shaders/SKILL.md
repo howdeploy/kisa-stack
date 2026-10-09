@@ -9,7 +9,7 @@ metadata:
 # Shoji shader workflow
 
 Find the user's current config first. Public source and detailed map:
-https://github.com/howdeploy/kisa-stack/tree/main/dotfiles ; read
+https://github.com/tab11pm/tab-stack/tree/main/dotfiles ; read
 `docs/shaders.md` and `sources.json` there or in a local checkout. No private
 project memory or author-specific path is required by this skill.
 

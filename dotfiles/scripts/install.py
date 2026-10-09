@@ -55,7 +55,7 @@ def main():
         if src.name == "shojiwm" and not Path("/usr/lib/shojiwm/packages/shoji_wm").is_dir():
             parser.error("Install the pinned ShojiWM fork and runtime first")
     os.umask(0o077)
-    backup_root = state / "kisa-dotfiles/backups"
+    backup_root = state / "tab-stack/backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     backup = Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-"), dir=backup_root))
     manifest = []
