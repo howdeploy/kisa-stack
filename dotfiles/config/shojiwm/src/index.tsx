@@ -443,6 +443,11 @@ function toggleLauncher() {
   });
 }
 COMPOSITOR.key.bind("launcher", "Super+Space", toggleLauncher);
+COMPOSITOR.key.bind("lock-session", "Super+L", () => {
+  COMPOSITOR.process.spawn({
+    command: `python3 "${configHome}/shoji-shell/lock/launch.py"`,
+  });
+});
 COMPOSITOR.key.bind("wallpaper-picker", "Super+W", () => {
   COMPOSITOR.process.spawn({ command: [
     "quickshell", "ipc", "--path", `${configHome}/shoji-shell`,

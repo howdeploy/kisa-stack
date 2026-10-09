@@ -1,6 +1,7 @@
 singleton Theme 1.0 Theme.qml
 singleton Settings 1.0 Settings.qml
 singleton Services 1.0 Services.qml
+singleton LockScreen 1.0 LockScreen.qml
 singleton Notifications 1.0 Notifications.qml
 singleton Dock 1.0 Dock.qml
 UiText 1.0 UiText.qml

@@ -57,11 +57,12 @@ WidgetSurface {
     UiText { x: 84; y: 48; width: parent.width - 100; text: "@" + Quickshell.env("USER"); font.pixelSize: 11; color: Theme.muted }
     Row {
         anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 92 }
-        spacing: 10
+        spacing: 6
         visible: !root.pending
         Repeater {
             model: [
                 { id: "settings", icon: "home-settings", name: "Настройки", accent: "#cba6f7" },
+                { id: "lock", icon: "home-lock", name: "Заблокировать экран", accent: "#a6e3a1" },
                 { id: "logout", icon: "home-logout", name: "Выйти из сессии", accent: "#89b4fa" },
                 { id: "reboot", icon: "home-reboot", name: "Перезагрузка", accent: "#fab387" },
                 { id: "poweroff", icon: "home-power", name: "Выключить компьютер", accent: "#f38ba8" }
@@ -82,9 +83,10 @@ WidgetSurface {
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
                 hint: modelData.name
-                enabled: !action.running
+                enabled: !action.running && !LockScreen.starting
                 onClicked: {
                     if (modelData.id === "settings") root.settingsRequested();
+                    else if (modelData.id === "lock") LockScreen.request();
                     else root.requestAction(modelData.id);
                 }
             }
@@ -103,7 +105,7 @@ WidgetSurface {
     }
     UiText {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 12 }
-        text: root.error; visible: !!text; color: Theme.danger; font.pixelSize: 10
+        text: root.error || LockScreen.error; visible: !!text; color: Theme.danger; font.pixelSize: 10
         horizontalAlignment: Text.AlignHCenter
     }
 }

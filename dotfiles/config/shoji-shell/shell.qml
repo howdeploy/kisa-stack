@@ -28,6 +28,10 @@ ShellRoot {
             statsProcess.write(JSON.stringify({ processes: processStatsWanted }) + "\n");
     }
     IpcHandler {
+        target: "session"
+        function lock(): void { LockScreen.request(); }
+    }
+    IpcHandler {
         target: "wallpaper"
         function toggle(outputName: string): void { Wallpapers.toggle(outputName); }
         function cancel(): void { Wallpapers.cancel(); }

@@ -1,5 +1,22 @@
 # Validation record
 
+## 2026-10-09 custom session lock
+
+The custom locker, profile button and `Super+L` binding were integrated into the
+publication source without replacing the installed desktop configuration.
+Seven launcher regression tests and five offscreen keyboard interaction tests
+passed. The keyboard tests cover editing/deletion from either view, shared
+clearing/submission, cursor/focus preservation and initialisation of a new output.
+Qt 6 QML lint reported no errors; the existing Quickshell `QProcess::ExitStatus`
+metadata warning and unused-import notices remain. Publication privacy checks and
+Git whitespace checks passed.
+
+The agent sandbox cannot connect to live Wayland/IPC sockets. Actual password
+authentication, lock/unlock and monitor hotplug have not been verified against
+the pinned public compositor revision. Automatic idle/sleep locking is disabled.
+Run the checks in the [locker guide](../config/shoji-shell/lock/README.md) in the
+installed desktop before relying on the new lock.
+
 ## 2026-10-04 source update
 
 Selected live desktop source was exported into the publication tree. The privacy

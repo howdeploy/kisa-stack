@@ -1,0 +1,4 @@
+#%PAM-1.0
+# Arch / Manjaro / Omarchy fallback. Includes system policy and rate limiting.
+auth       include      system-auth
+account    include      system-local-login

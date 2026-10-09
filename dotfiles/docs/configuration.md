@@ -12,6 +12,7 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 | --- | --- |
 | `Super+Return` | Ghostty |
 | `Super+Space` | Walker |
+| `Super+L` | Lock the session with the custom Quickshell locker |
 | `Super+E` | Dolphin |
 | `Super+W` | Wallpaper and widget preset picker |
 | `Super+Shift+S` | Screenshot editor on the current monitor |
@@ -28,6 +29,15 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 Keyboard layouts are `us,ru`, toggled with Alt+Shift. Change the input configuration
 for your languages and pointer/trackpad preferences. The public setup does not
 autostart a VPN or reference the author's application profiles.
+
+## Session lock
+
+The Home Zone profile includes a lock button; `Super+L` starts the same independent
+Quickshell locker. Password entry is shared across outputs. Panel reloads do not
+restart an active lock. Run `python3 ~/.config/shoji-shell/lock/launch.py --check`
+and `--preview` before the first manual lock. Automatic idle/sleep locking is not
+enabled. See [the locker guide](../config/shoji-shell/lock/README.md) for PAM
+requirements, validation and recovery if the locker crashes.
 
 ## Monitors, wallpaper and presets
 
