@@ -1,45 +1,29 @@
-# Глобальный конфиг — CLAUDE.md + AGENTS.md + хуки
+# Global instruction templates
 
-Продуманная система поведения для двух рантаймов: глобальный `CLAUDE.md` для Claude Code и парный к нему глобальный `AGENTS.md` для Codex CLI (идентичность, приоритеты, согласование, антипаттерны — одна методология, адаптированная под особенности каждого агента) + два хука, которые держат LLM Wiki в фокусе анализа на протяжении всей сессии — включая восстановление после компакта.
+These templates describe the current KISA workflow for Claude Code and Codex: Z.A.E.B.A.L., Ponytail, Graphify, Choirboy Prompt and Deploychan MCP. Install the integrations separately using the links in [plugins.md](../plugins.md).
 
-## Что внутри
-
-| Файл | Назначение |
+| File | Destination |
 |---|---|
-| `CLAUDE.md` | Шаблон глобального `~/.claude/CLAUDE.md` — ядро системы (Claude Code) |
-| `AGENTS.md` | Шаблон глобального `~/.codex/AGENTS.md` — та же методология для Codex CLI |
-| `hooks/wiki-anchor.sh` | SessionStart-хук: инжектит якорь вики на старте сессии и после компакта |
-| `hooks/wiki-reminder.sh` | UserPromptSubmit-хук: напоминание про вики каждый 3-й промпт |
-| `settings.hooks.example.json` | Пример подключения хуков в `~/.claude/settings.json` |
+| [CLAUDE.md](CLAUDE.md) | `~/.claude/CLAUDE.md` |
+| [AGENTS.md](AGENTS.md) | `~/.codex/AGENTS.md` (or your configured Codex home) |
 
-## Установка
+## Install
 
-1. **CLAUDE.md.** Откройте `CLAUDE.md`, замените плейсхолдеры `<...>` под свой сетап (путь к vault, пути к репо). Блоки, помеченные комментариями как опциональные (LLM Wiki, ObsidianDataWeave, маппинг скиллов), уберите или адаптируйте, если не используете эти компоненты. Затем:
+Read and adapt the relevant template. Merge it with your existing global instructions; keep a backup before replacing an existing file. The templates preserve KISA's preference for Russian private chat and English GitHub communication; change that preference for your own use if needed.
 
-   ```bash
-   cp CLAUDE.md ~/.claude/CLAUDE.md
-   ```
+The templates do not install plugins, MCP servers or skills. Check availability in the active runtime before using an integration. Use [Deploychan MCP's documentation](https://github.com/howdeploy/deploychan_mcp) to connect the personal catalog.
 
-2. **AGENTS.md (Codex).** Тот же порядок: замените плейсхолдеры `<...>`, удалите ненужные опциональные блоки (LLM Wiki, rtk-include в шапке). Затем:
+## Working rules
 
-   ```bash
-   cp AGENTS.md ~/.codex/AGENTS.md
-   ```
+- Understand the requested outcome and read the current implementation before editing.
+- Make the smallest complete change, preserving existing behavior and unfinished user work.
+- Use native tools and verify claims against files, command output and current sources.
+- Ask about material scope decisions, new access, spending and destructive actions.
+- Leave tests, builds, lint, typechecks, browser checks and subagents to an explicit user request.
+- Report what changed, what was checked by reading, and what was not run.
 
-3. **Хуки.** Понадобится `jq` (`sudo pacman -S jq` / `sudo apt install jq`).
+## Optional local knowledge base
 
-   ```bash
-   mkdir -p ~/.claude/hooks
-   cp hooks/wiki-anchor.sh hooks/wiki-reminder.sh ~/.claude/hooks/
-   chmod +x ~/.claude/hooks/wiki-anchor.sh ~/.claude/hooks/wiki-reminder.sh
-   ```
+A personal knowledge base is not required to use the workflow. If you have one, add its canonical path and reading rules to your own instructions. Read relevant project context directly from files and write memory only within an explicit request. Obsidian may be used as a viewer; no separate writer or import pipeline is required.
 
-   В `wiki-anchor.sh` укажите путь к своему vault (переменная `WIKI_VAULT` в начале файла). В `wiki-reminder.sh` при желании дополните фильтр директорий, где напоминание не нужно.
-
-4. **Подключение хуков.** Перенесите блок `hooks` (и `autoMemoryEnabled`, если ведете память в вики, а не в авто-памяти Claude Code) из `settings.hooks.example.json` в свой `~/.claude/settings.json`. После правки перезапустите Claude Code.
-
-## Как это работает
-
-- `CLAUDE.md` и `AGENTS.md` задают одинаковое поведение в обоих рантаймах: сначала думать, потом делать; решать ровно поставленную задачу; проверять факты инструментами, а не памятью; уточнять существенные развилки и передавать тестирование пользователю.
-- `wiki-anchor.sh` после compaction напоминает, где лежит проектный контекст. Хук срабатывает на `startup|resume|compact`.
-- `wiki-reminder.sh` каждый 3-й промпт напоминает искать в Wiki страницы, относящиеся к запросу.
+The `hooks/wiki-anchor.sh`, `hooks/wiki-reminder.sh` and `settings.hooks.example.json` files are legacy examples preserved for reference. They are not part of the current setup; do not copy them as an installation step. If you previously enabled those hooks, review and remove their entries from your own settings when migrating, preserving unrelated hooks and settings.

@@ -1,104 +1,45 @@
 # KISA Stack [![Awesome](https://awesome.re/badge.svg)](https://awesome.re)
 
-Личный сетап для вайбкодинга: продуманная система поведения AI-ассистентов, скиллы, хуки и плагины. Все, что я реально гоняю каждый день — в виде, который можно развернуть у себя за пять минут.
+My personal coding-agent workflow and desktop dotfiles.
 
-Каждый артефакт совместим сразу с тремя рантаймами: **Claude Code**, **Codex CLI** и **Hermes**.
+## Current workflow
 
-## Contents
+**Only these five components make up my current personal workflow:**
 
-- [Desktop dotfiles](dotfiles/): ShojiWM, Quickshell, Walker, shaders and portable setup
+- [Z.A.E.B.A.L.](https://github.com/howdeploy/Z.A.E.B.A.L) — investigate agent mistakes when criticism is addressed to the agent or an audit is explicitly requested.
+- [Ponytail](https://github.com/dietrichgebert/ponytail) — understand the existing implementation and make the smallest complete change.
+- [Graphify](https://pypi.org/project/graphifyy/) — build and query a project knowledge graph when explicitly requested.
+- [Choirboy Prompt](https://github.com/howdeploy/choirboy-prompt) — load established team decisions and project context when needed.
+- [Deploychan MCP](https://github.com/howdeploy/deploychan_mcp) — my curated knowledge and skill catalog, available at `https://mcp.deploychan.webcam/mcp`.
 
-- [Глобальный конфиг](#глобальный-конфиг)
-- [Основной стек](#основной-стек)
-- [Скиллы](#скиллы)
-- [Плагины](#плагины)
-- [Установка](#установка)
-- [Совместимость](#совместимость)
+Use each project's own installation instructions for your runtime. This repository does not bundle or install these five integrations. Their documentation and availability determine runtime support.
 
-## Глобальный конфиг
+See [plugins.md](plugins.md) for how the components work together.
 
-Ядро системы — поведение ассистента: сначала думать, потом делать; решать ровно поставленную задачу; проверять факты инструментами, а не памятью; уточнять существенные развилки и отдавать реализацию пользователю для тестирования.
+## Global instructions
 
-- [CLAUDE.md](global-config/CLAUDE.md) — глобальный конфиг Claude Code: идентичность, приоритеты, правила, антипаттерны.
-- [AGENTS.md](global-config/AGENTS.md) — та же методология, адаптированная под Codex CLI.
-- [Хуки](global-config/hooks) — якорь LLM Wiki на старте сессии и после компакта + периодическое напоминание: директивы переживают сжатие контекста.
+[global-config/](global-config/) contains paired `CLAUDE.md` and `AGENTS.md` templates: understand the task, read the existing code, preserve working behavior, and deliver the requested change for the user to check. Tests and other agents require an explicit user request.
 
-Пошаговая установка: [global-config/README.md](global-config/README.md).
+Adapt the templates before copying them into your global configuration. Integrations remain subject to the user's task and the runtime's permissions.
 
-## Основной стек
+## Desktop dotfiles
 
-- [Ponytail](https://github.com/dietrichgebert/ponytail) — минимальное решение для задач с кодом после изучения существующей реализации.
-- [Z.A.E.B.A.L.](https://github.com/howdeploy/Z.A.E.B.A.L) — аудит ошибок при адресованной агенту ругани или явном вызове.
-- [Choirboy Prompt](https://github.com/howdeploy/choirboy-prompt) — контекст установленных командных решений по мере надобности.
-- Graphify — локальный скилл для графа проекта, запускается только по прямой просьбе пользователя.
+[dotfiles/](dotfiles/) contains ShojiWM, Quickshell, Walker, shaders and the portable desktop setup. Follow its own [README](dotfiles/README.md) for installation; desktop configuration is separate from the coding-agent workflow.
 
-Интеграции ставятся отдельно в поддерживаемые рантаймы; перечисление здесь само по себе их не устанавливает. Остальные скиллы ниже — каталог под отдельные задачи.
+## Archived skills
 
-## Скиллы
+[skills/](skills/) preserves earlier task-specific skills for reference. **They are not my current workflow or a recommended starter bundle.** The old bulk-install command is disabled so it cannot install that archive as the current stack.
 
-Один и тот же скилл ставится в `~/.claude/skills/`, `~/.codex/skills/` или `~/.hermes/skills/` — формат общий, Codex-метаданные и Hermes-конвенции уже внутри.
-
-### Ресерч и знания
-
-- [researcher](skills/researcher) - Signal-only ресерч в двух режимах (quick-scan / deep-research) с фолбэками и отработанными спецслучаями: от X-тредов про взломы до локальных коммунальных аварий.
-- [gamer-signal](skills/gamer-signal) - Игровой ресерч строго по доверенным источникам (официальные патчноуты, Steam, allowlist-вики). Никаких выдуманных механик: нет подтверждения — честное «не нашла».
-- [telegram-chat-wiki](skills/telegram-chat-wiki) - Превращает экспорт Telegram-переписки в двухслойную wiki-память: сырые day-chunks по датам + hub-страница собеседника. Потом можно спрашивать «что я обсуждал с Колей?».
-
-### Контент и медиа
-
-- [css-graphics](skills/css-graphics) - Графика средствами HTML/CSS/SVG с рендером в PNG/JPG через Puppeteer: обложки, OG-картинки, бейджи и баннеры без дизайнера.
-- [stream-timecodes](skills/stream-timecodes) - Ровно 18 таймкодов для стрима или подкаста из VTT-транскрипции, равномерно по длительности и без воды.
-- [voice-summary](skills/voice-summary) - Выжимки из голосовых: структурный пересказ в 4 блока или action-first режим — войс сразу превращается в ТЗ, prompt или баг-лист.
-
-### Музыка и озвучка
-
-- [elevenlabs-living-voice](skills/elevenlabs-living-voice) - Живая речь в ElevenLabs: нарезка текста на дыхательные блоки, паузы и audio tags под v2/v3, плюс feedback loop через voice settings API.
-- [suno-music](skills/suno-music) - Генерация треков через EvoLink Suno API со специализацией на voiceover-safe фонах: банк промптов для underscore, seamless loop и muted synthwave.
-- [ai-music-and-audio-tools](skills/ai-music-and-audio-tools) - Зонтик по AI-музыке: лирика и структура песен, промптинг Suno-подобных систем, локальная генерация (AudioCraft/MusicGen), спектрограммы.
-
-### Система и железо
-
-- [shojiwm](skills/shojiwm) — configure the KISA desktop and understand its compositor, shell and launcher.
-- [shoji-shaders](skills/shoji-shaders) — create ShojiWM and Quickshell effects from visual references.
-
-- [wine-hid-device-tools](skills/wine-hid-device-tools) - Запуск Windows-утилит для HID-клавиатур под Wine/PortProton/Bottles: диагностика hidraw, udev-правила, winebus-реестр — вместо «ставь виртуалку».
-
-### Личное
-
-- [emotional-support](skills/emotional-support) - Режим эмоциональной поддержки: активное слушание, валидация и аккуратный CBT-рефрейминг вместо дежурного «все будет хорошо».
-
-## Плагины
-
-Мой набор плагинов Claude Code со ссылками, описаниями и шпаргалкой по установке — в [plugins.md](plugins.md). Там же — наборы и тулзы вне маркетплейса (gstack, gsd-core, rtk, Agentation, Remotion, мой пайплайн [ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave)), «фразы кабанчика» и мой [MTGA](https://github.com/howdeploy/MTGA) (Claude отвечает как трамповские твиты, TREMENDOUS!).
-
-## Установка
-
-Скиллы ставятся одной командой из корня репозитория:
+If you deliberately want an archived skill, review it first and install it by name:
 
 ```bash
-# все скиллы в Claude Code + Codex
-./install.sh all
-
-# один скилл в конкретный рантайм
-./install.sh researcher --claude
-./install.sh suno-music --codex
-./install.sh voice-summary --hermes
+./install.sh <skill-name> --claude
+./install.sh <skill-name> --codex
+./install.sh <skill-name> --hermes
 ```
 
-Существующие скиллы бэкапятся с таймстампом. Глобальный конфиг и хуки — по инструкции в [global-config/README.md](global-config/README.md).
-
-Для suno-music дополнительно нужен API-ключ EvoLink: скопируй `.env.example` в `.env` рядом со скриптами скилла.
-
-## Совместимость
-
-| Рантайм | Скиллы | Конфиг | Примечания |
-|---|---|---|---|
-| Claude Code | `~/.claude/skills/` | `~/.claude/CLAUDE.md` + хуки | основной сетап |
-| Codex CLI | `~/.codex/skills/` | `~/.codex/AGENTS.md` | у каждого скилла есть `agents/openai.yaml` |
-| Hermes | `~/.hermes/skills/` | — | `metadata.hermes` во frontmatter; маппинг инструментов описан в самих скиллах |
-
-Скиллы, рожденные в одной среде, несут примечания для двух других: имена инструментов (`Bash` ↔ `terminal`, `Tavily` ↔ `web_search`) и конвенции доставки (`MEDIA:/path`, Telegram) — логика от рантайма не зависит.
+Without a runtime flag, the script targets Claude Code and Codex. Existing skill directories are backed up with a timestamp. The script installs only the selected archived skill; it does not set up the current workflow, global instructions or desktop.
 
 ## Contributing
 
-Это подборка моего личного сетапа для моей аудитории. Нашли проблему или хотите предложить улучшение — открывайте issue.
+This is my personal setup. Open an issue if a published instruction is stale or something is broken.

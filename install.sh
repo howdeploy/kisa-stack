@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Установка скиллов в Claude Code (~/.claude/skills), Codex (~/.codex/skills)
-# и/или Hermes (~/.hermes/skills). Скиллы взаимно совместимы: один и тот же
-# SKILL.md работает во всех трех рантаймах.
+# Install one explicitly selected archived skill. This does not install the
+# current KISA workflow; see README.md for the five current integrations.
 #
-# Использование:
-#   ./install.sh <skill-name|all> [--claude] [--codex] [--hermes]
+# Usage:
+#   ./install.sh <skill-name> [--claude] [--codex] [--hermes]
 #
-# Без флагов рантайма ставит в Claude Code + Codex (--hermes только явно).
-# Существующий скилл бэкапится с таймстампом. Если твой Hermes раскладывает
-# скиллы по категориям (media/, note-taking/, ...), перенеси папку скилла в
-# нужную категорию после установки или задай HERMES_HOME.
+# Defaults to Claude Code + Codex; Hermes requires --hermes.
+# Existing skills are backed up with a timestamp. For categorized Hermes
+# installations, move the skill into the appropriate category or set HERMES_HOME.
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 skills_dir="$repo_dir/skills"
 
 usage() {
-  echo "Usage: $0 <skill-name|all> [--claude] [--codex] [--hermes]" >&2
-  echo "Available skills:" >&2
+  echo "Usage: $0 <skill-name> [--claude] [--codex] [--hermes]" >&2
+  echo "Archived skills (not the current KISA workflow):" >&2
   for d in "$skills_dir"/*/; do
     [ -d "$d" ] || continue
     echo "  - $(basename "$d")" >&2
@@ -82,20 +80,14 @@ install_one() {
 }
 
 if [ "$selection" = "all" ]; then
-  names=()
-  for d in "$skills_dir"/*/; do
-    [ -d "$d" ] || continue
-    names+=("$(basename "$d")")
-  done
-else
-  names=("$selection")
+  echo "Bulk installation is disabled: skills/ is an archive, not the current KISA workflow." >&2
+  echo "See README.md for the current stack, or select one archived skill by name." >&2
+  exit 2
 fi
 
 for target_root in "${targets[@]}"; do
-  for name in "${names[@]}"; do
-    install_one "$name" "$target_root"
-  done
+  install_one "$selection" "$target_root"
 done
 
 echo ""
-echo "Done. Перезапустите Claude Code / Codex / Hermes, чтобы список скиллов обновился."
+echo "Done. Restart Claude Code / Codex / Hermes to refresh the skill list."
