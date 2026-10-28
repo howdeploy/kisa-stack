@@ -30,7 +30,8 @@ git -C "$work/engine" apply "$root/patches/wallpaper-engine/engine-media-memory.
 export PKG_CONFIG_PATH="$work/mpv-install/lib/pkgconfig:$PKG_CONFIG_PATH"
 cmake -S "$work/engine" -B "$work/engine/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
     -DMPV_LIBRARY_mpv="$work/mpv-install/lib/libmpv.so" -DMPV_INCLUDE_DIR="$work/mpv-install/include"
-cmake --build "$work/engine/build" --target linux-wallpaperengine --parallel "$jobs"
+# Installation also includes dependency tools, so build the complete installable set.
+cmake --build "$work/engine/build" --parallel "$jobs"
 
 bundle="$work/bundle"
 mkdir -p "$bundle/lib"
