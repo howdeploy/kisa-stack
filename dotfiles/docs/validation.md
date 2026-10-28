@@ -1,5 +1,17 @@
 # Validation record
 
+## 2026-10-28 media reply/signal ordering follow-up
+
+The media patch is refreshed to PR #711 revision `97e0a2a`. Each completed
+request is applied immediately after its message is dispatched, before a later
+PropertiesChanged signal. Incomplete requests are left until the final deadline
+check after the bounded batch, preserving the delayed-frame reply fix.
+
+The private-bus fixture now queues a Playing discovery reply followed by Paused
+or Stopped. Another regression queues a signal before a Position reply with
+an expired application deadline. Source/diff review was performed; the tests
+and a build were not run. No installed runtime or live session was changed.
+
 ## 2026-10-28 delayed-frame media reply follow-up
 
 The media patch is refreshed to PR #711 revision `2de3518`. Available D-Bus
