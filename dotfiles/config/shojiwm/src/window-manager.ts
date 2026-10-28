@@ -2006,7 +2006,8 @@ export class HybridWindowManager {
   }
 
   public isWindowAboveFullscreen(window: WaylandWindow): boolean {
-    return window.isTransient() || isFloatingUtilityWindow(window) || this.isWindowPinned(window);
+    return window.isTransient() || isFloatingUtilityWindow(window)
+      || isTelegramMediaViewer(window) || this.isWindowPinned(window);
   }
 
   public toggleWindowPin(window: WaylandWindow) {
