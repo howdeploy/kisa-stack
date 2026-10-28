@@ -22,7 +22,7 @@
   "wallpaper_engine": {
     "repository": "https://github.com/Almamu/linux-wallpaperengine",
     "revision": "b016d7d1fdcf4e5fd2f9c9fa420a8aaa07fee02d",
-    "media_patch_revision": "97e0a2ad01800b290bf3a44254fa06d76f5ffbbc",
+    "media_patch_revision": "7f94c7739b83790c384ded3c03074763495eeb3a",
     "media_pull_request": "https://github.com/Almamu/linux-wallpaperengine/pull/711",
     "patches": ["patches/wallpaper-engine/existing-crop-upscale.patch", "patches/wallpaper-engine/engine-media-memory.patch"],
     "mpv_repository": "https://github.com/mpv-player/mpv",

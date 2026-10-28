@@ -1,5 +1,19 @@
 # Validation record
 
+## 2026-10-28 MPRIS signal-owner validation follow-up
+
+The media patch is refreshed to PR #711 revision `7f94c77`. Only current owners
+of MPRIS services may supply PropertiesChanged signals. The owner registry uses
+asynchronous GetNameOwner discovery and authenticated NameOwnerChanged signals;
+losing the last MPRIS name revokes selection and cancels stale property work.
+Discovery status replies must also match the registered service owner.
+
+The private-bus fixture now covers an unrelated peer, a forged ownership signal,
+startup owner discovery, and name release/replacement. These regression cases
+and a new build were not run. Source/diff review, patch compatibility and staged
+publication privacy checks are recorded for this update. No installed runtime
+or live session was changed.
+
 ## 2026-10-28 media reply/signal ordering follow-up
 
 The media patch is refreshed to PR #711 revision `97e0a2a`. Each completed

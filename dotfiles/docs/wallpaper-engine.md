@@ -8,7 +8,7 @@ source build below supplies the renderer; it does not download Steam content.
 
 `sources.json` records the engine base, mpv and NVIDIA codec-header revisions.
 The engine media patch is exported from
-[PR #711 revision 97e0a2a](https://github.com/Almamu/linux-wallpaperengine/commit/97e0a2ad01800b290bf3a44254fa06d76f5ffbbc).
+[PR #711 revision 7f94c77](https://github.com/Almamu/linux-wallpaperengine/commit/7f94c7739b83790c384ded3c03074763495eeb3a).
 It includes asynchronous D-Bus requests, a 250 ms application deadline, bounded
 dispatch, metadata retries and failed-player cooldown, plus regression cases.
 After a delayed frame, available replies are read/dispatched before applying
@@ -17,6 +17,9 @@ also gets an immediate zero-timeout I/O attempt.
 Completed replies are applied between dispatched messages so a later pause/stop
 signal is not overwritten by an older Playing reply. Incomplete-request expiry
 is checked after the dispatch batch.
+PropertiesChanged signals must come from a current owner of an MPRIS service.
+Startup discovery resolves owners asynchronously with GetNameOwner; authenticated
+NameOwnerChanged signals keep that registry current and revoke former owners.
 
 | Patch | Purpose |
 | --- | --- |
