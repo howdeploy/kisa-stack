@@ -137,7 +137,8 @@ class ProcessSampler:
                 seen.add(cursor)
                 if cursor in games:
                     app_id = games[cursor]
-                    return f'game:{app_id}', 'Игра Steam', 'image', app_id
+                    label = 'Minecraft' if app_id == 'minecraft' else 'Игра Steam'
+                    return f'game:{app_id}', label, 'image', app_id
                 name = (records[cursor]['name'] or '').lower()
                 if agent is None:
                     for prefix, (label, icon) in agents.items():

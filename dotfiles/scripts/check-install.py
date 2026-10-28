@@ -32,6 +32,29 @@ def main():
         backed_up = [Path(e["backup"]) for m in manifests for e in json.loads(m.read_text()) if e["backup"]]
         assert any((p / "user-note").is_file() for p in backed_up)
         assert (home / ".local/bin/codex-resume-ghostty").stat().st_mode & 0o111
+        bundle = Path(directory) / "wallpaper bundle"
+        for name in ("runtime/linux-wallpaperengine", "runtime/liblinux-wallpaperengine-lib.so",
+                     "runtime/libcef.so", "lib/libmpv.so.2"):
+            file = bundle / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(b"fixture, never executed")
+        (bundle / "runtime/linux-wallpaperengine").chmod(0o755)
+        (bundle / "sources.json").write_bytes((ROOT / "sources.json").read_bytes())
+        wallpaper_args = [*args, "--component", "wallpaper-engine", "--wallpaper-bundle", str(bundle), "--apply"]
+        subprocess.run(wallpaper_args, check=True, capture_output=True)
+        installed = home / ".local/share/shoji-shell/wallpaper-engine"
+        assert (installed / "runtime/libcef.so").read_bytes() == b"fixture, never executed"
+        (installed / "lib/user-note").write_text("keep previous runtime")
+        subprocess.run(wallpaper_args, check=True, capture_output=True)
+        manifests = list(home.glob(".local/state/kisa-dotfiles/backups/*/manifest.json"))
+        assert len(manifests) == 4
+        backed_up = [Path(e["backup"]) for m in manifests for e in json.loads(m.read_text()) if e["backup"]]
+        assert any((p / "lib/user-note").is_file() for p in backed_up)
+        (bundle / "lib/libmpv.so.2").unlink()
+        rejected = subprocess.run(wallpaper_args, capture_output=True)
+        assert rejected.returncode != 0
+        assert (installed / "runtime/linux-wallpaperengine").is_file()
+        assert len(list(home.glob(".local/state/kisa-dotfiles/backups/*/manifest.json"))) == 4
         print("Preview, isolated install, generated paths, runtime link and second-install backups: OK")
 
 

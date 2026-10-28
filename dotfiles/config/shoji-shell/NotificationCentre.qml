@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     spacing: 12
     Rectangle {
-        Layout.fillWidth: true; implicitHeight: 72; radius: 8
+        Layout.fillWidth: true; implicitHeight: 72; radius: Theme.surfaceRadius
         color: Notifications.quiet ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.10)
             : Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.035)
         border.width: 1; border.color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.07)
@@ -25,10 +25,18 @@ ColumnLayout {
                 onToggled: Notifications.quiet = checked
                 padding: 0
                 indicator: Rectangle {
-                    implicitWidth: 38; implicitHeight: 22; radius: 11
+                    implicitWidth: 38; implicitHeight: 22; radius: 7
                     color: quietSwitch.checked ? Theme.accent : Theme.line
                     border.width: quietSwitch.visualFocus ? 2 : 0; border.color: Theme.ink
-                    Rectangle { x: quietSwitch.checked ? 19 : 3; y: 3; width: 16; height: 16; radius: 8; color: quietSwitch.checked ? Theme.surface : Theme.ink }
+                    Behavior on color { ColorAnimation { duration: Theme.duration(360) } }
+                    Rectangle {
+                        x: quietSwitch.checked ? parent.width - width - 3 : 3
+                        y: 3; width: quietSwitch.down ? 19 : 16; height: 16; radius: 5
+                        color: quietSwitch.checked ? Theme.surface : Theme.ink
+                        Behavior on x { NumberAnimation { duration: Theme.duration(460); easing.type: Easing.BezierSpline; easing.bezierCurve: [0.4, 0, 0.2, 1, 1, 1] } }
+                        Behavior on width { NumberAnimation { duration: Theme.duration(220); easing.type: Easing.OutCubic } }
+                        Behavior on color { ColorAnimation { duration: Theme.duration(320) } }
+                    }
                 }
             }
         }
@@ -46,13 +54,13 @@ ColumnLayout {
     }
     Rectangle {
         visible: Notifications.count === 0
-        Layout.fillWidth: true; implicitHeight: 176; radius: 8
+        Layout.fillWidth: true; implicitHeight: 176; radius: Theme.surfaceRadius
         color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.025)
         ColumnLayout {
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 20 }
             spacing: 12
             Rectangle {
-                Layout.alignment: Qt.AlignHCenter; implicitWidth: 40; implicitHeight: 40; radius: 8
+                Layout.alignment: Qt.AlignHCenter; implicitWidth: 40; implicitHeight: 40; radius: Theme.surfaceRadius
                 color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.05)
                 PanelIcon { anchors.centerIn: parent; name: "bell"; tint: Theme.accent; implicitWidth: 28; implicitHeight: 28 }
             }

@@ -11,12 +11,31 @@ import Quickshell.Wayland
 
 ShellRoot {
     id: root
+    MateEngineIdle {}
+    readonly property var sessionLock: Lock
+    Connections {
+        target: Lock
+        function onLockedChanged(): void {
+            if (Lock.locked) { root.panelPage = ""; SystemSettings.close(); }
+        }
+    }
     property string primaryOutputName: WidgetLayouts.primaryOutputName
     readonly property var primaryOutput: Quickshell.screens.find(screen => screen.name === primaryOutputName)
         || Quickshell.screens[0] || null
     property string panelScreen: ""
     property string panelPage: ""
     property bool panelReady: false
+    Binding {
+        target: Media
+        property: "active"
+        value: (root.panelPage === "controls" && root.panelReady)
+            || (SystemSettings.opened && SystemSettings.page === "audio")
+    }
+    SystemSettingsDrawer {}
+    Connections {
+        target: SystemSettings
+        function onOpenedChanged(): void { if (SystemSettings.opened) root.panelPage = ""; }
+    }
     property var stats: ({})
     property double statsAt: 0
     property bool statsReady: false

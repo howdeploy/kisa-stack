@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import shutil
 import signal
 import socket
 import subprocess
@@ -181,16 +182,31 @@ def renderer_key(layer):
 
 def launch(layer, assets, logs):
     screens = layer['outputs']
-    command = ['linux-wallpaperengine', '--layer', 'background', '--fps', '30',
+    environment = crop_environment(layer)
+    libraries = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'shoji-shell/wallpaper-engine/lib'
+    runtime = libraries.parent / 'runtime'
+    private_engine = runtime / 'linux-wallpaperengine'
+    executable = str(private_engine) if private_engine.is_file() else shutil.which('linux-wallpaperengine')
+    if not executable:
+        raise ValueError('Движок обоев не установлен. Выполни dotfiles/scripts/build-wallpaper-engine.sh и установи напечатанный bundle.')
+    if private_engine.is_file() and not all(path.is_file() for path in
+            (runtime / 'liblinux-wallpaperengine-lib.so', runtime / 'libcef.so', libraries / 'libmpv.so.2')):
+        raise ValueError('Частный движок обоев установлен не полностью. Повтори установку bundle.')
+    environment.update(SDL_AUDIODRIVER='dummy',
+                       LD_LIBRARY_PATH=os.pathsep.join(filter(None, (
+                           str(libraries), str(runtime), environment.get('LD_LIBRARY_PATH', '')))))
+    command = [executable, '--layer', 'background', '--fps', '30',
                '--silent', '--disable-mouse', '--assets-dir', assets]
     command += (['--screen-span', ','.join(screens)] if len(screens) > 1 else ['--screen-root', screens[0]])
     command += ['--bg', layer['path'], '--scaling', 'fill', '--clamp', 'border']
     with (logs / 'live-wallpaper.log').open('a') as log:
+        if not private_engine.is_file():
+            print('System engine fallback: the dotfiles memory/crop patches are not guaranteed. Build the private runtime.', file=log)
         print(time.strftime('\n%Y-%m-%d %H:%M:%S'), 'Starting:', ' '.join(command), file=log, flush=True)
         # A stuck decoder may ignore TERM; it must not outlive its supervisor.
         return subprocess.Popen(['setpriv', '--pdeathsig', 'KILL', '--', *command], stdin=subprocess.DEVNULL,
             stdout=log, stderr=log, start_new_session=True,
-            env=dict(crop_environment(layer), SDL_AUDIODRIVER='dummy'))
+            env=environment, cwd=runtime if private_engine.is_file() else None)
 
 
 def serve():

@@ -1,0 +1,82 @@
+diff --git a/src/WallpaperEngine/Render/CWallpaper.cpp b/src/WallpaperEngine/Render/CWallpaper.cpp
+index d0f7eab..a9ea23e 100644
+--- a/src/WallpaperEngine/Render/CWallpaper.cpp
++++ b/src/WallpaperEngine/Render/CWallpaper.cpp
+@@ -112,8 +112,26 @@ void CWallpaper::setupShaders () {
+ 		    "uniform sampler2D g_Texture0;\n"
+ 		    "in vec2 v_TexCoord;\n"
+ 		    "out vec4 out_FragColor;\n"
++		    "float cubic(float x) {\n"
++		    "  x = abs(x);\n"
++		    "  return x < 1.0 ? (1.5*x - 2.5)*x*x + 1.0 : x < 2.0 ? ((-0.5*x + 2.5)*x - 4.0)*x + 2.0 : 0.0;\n"
++		    "}\n"
++		    "vec4 upscale(vec2 uv, vec2 size) {\n"
++		    "  vec2 pixel = uv * size - 0.5;\n"
++		    "  vec2 base = floor(pixel), f = fract(pixel);\n"
++		    "  vec4 sum = vec4(0.0), low = vec4(1.0), high = vec4(0.0);\n"
++		    "  for (int y = -1; y <= 2; ++y) for (int x = -1; x <= 2; ++x) {\n"
++		    "    vec2 p = clamp(base + vec2(x, y), vec2(0.0), size - 1.0);\n"
++		    "    vec4 c = texelFetch(g_Texture0, ivec2(p), 0);\n"
++		    "    sum += c * cubic(float(x) - f.x) * cubic(float(y) - f.y);\n"
++		    "    if (x >= 0 && x <= 1 && y >= 0 && y <= 1) { low = min(low, c); high = max(high, c); }\n"
++		    "  }\n"
++		    "  return clamp(sum, low, high);\n"
++		    "}\n"
+ 		    "void main () {\n"
+-		    "out_FragColor = texture (g_Texture0, v_TexCoord);\n"
++		    "vec2 size = vec2(textureSize(g_Texture0, 0));\n"
++		    "float footprint = max(length(dFdx(v_TexCoord) * size), length(dFdy(v_TexCoord) * size));\n"
++		    "out_FragColor = footprint < 0.999 ? upscale(v_TexCoord, size) : texture(g_Texture0, v_TexCoord);\n"
+ 		    "}";
+ 
+     glShaderSource (fragmentShaderID, 1, &sourcePointer, nullptr);
+diff --git a/src/WallpaperEngine/Render/WallpaperState.cpp b/src/WallpaperEngine/Render/WallpaperState.cpp
+index 6f9dc1a..f3026c8 100644
+--- a/src/WallpaperEngine/Render/WallpaperState.cpp
++++ b/src/WallpaperEngine/Render/WallpaperState.cpp
+@@ -2,6 +2,8 @@
+ #include "TextureProvider.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ #include <algorithm>
++#include <cmath>
++#include <cstdlib>
+ 
+ using namespace WallpaperEngine::Render;
+ 
+@@ -88,6 +90,29 @@ template <> void WallpaperState::updateTextureUVs<WallpaperState::TextureUVsScal
+     } else if (projectionHeight != viewportHeight) {
+ 	this->updateVs (projectionWidth, projectionHeight);
+     }
++
++    // Apply the crop to the complete wallpaper before CWallpaper slices the span.
++    // Without the shell's environment, retain the engine's existing scaling.
++    if (std::getenv ("SHOJI_WALLPAPER_CROP_X") || std::getenv ("SHOJI_WALLPAPER_CROP_Y")
++        || std::getenv ("SHOJI_WALLPAPER_ZOOM")) {
++        const auto setting = [] (const char* name, float fallback, float low, float high) {
++            const char* value = std::getenv (name);
++            if (!value) return fallback;
++            char* end = nullptr;
++            const float number = std::strtof (value, &end);
++            return end != value && *end == '\0' && std::isfinite (number)
++                ? std::clamp (number, low, high) : fallback;
++        };
++        const float zoom = setting ("SHOJI_WALLPAPER_ZOOM", 1.0f, 1.0f, 3.0f);
++        const float width = std::abs (m_UVs.uend - m_UVs.ustart) / zoom;
++        const float height = std::abs (m_UVs.vend - m_UVs.vstart) / zoom;
++        const float left = (1.0f - width) * setting ("SHOJI_WALLPAPER_CROP_X", 0.5f, 0.0f, 1.0f);
++        const float top = (1.0f - height) * setting ("SHOJI_WALLPAPER_CROP_Y", 0.5f, 0.0f, 1.0f);
++        m_UVs.ustart = left;
++        m_UVs.uend = left + width;
++        m_UVs.vstart = m_vflip ? top : 1.0f - top;
++        m_UVs.vend = m_vflip ? top + height : 1.0f - top - height;
++    }
+ }
+ 
+ template <> void WallpaperState::updateTextureUVs<WallpaperState::TextureUVsScaling::ZoomFitUVs> () {
+@@ -183,4 +208,4 @@ void WallpaperState::updateState (
+ 	    );
+ 	    break;
+     }
+-}
+\ No newline at end of file
++}

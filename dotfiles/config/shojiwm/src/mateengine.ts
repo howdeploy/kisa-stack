@@ -28,6 +28,33 @@ let pointerTarget: PointerMoveEvent["target"] = { kind: "none" };
 const shellDocks = new Map<string, { rect: Rect | null; visible: boolean; updated: number }>();
 let seating: { target: string | null; probe: { x: number; y: number } | null; updated: number } =
   { target: null, probe: null, updated: 0 };
+let screensaver = { timeout: 30, enabled: false, revision: 0, updated: 0 };
+let idleFeedback: { revision: number; idle: boolean; updated: number } | null = null;
+
+export function mateEngineLockScene(wm: HybridWindowManager) {
+  const configure = (COMPOSITOR as unknown as { session?: {
+    configureLockBackground?: (selection: { windowIds: string[]; layerIds: string[] }) => boolean;
+  } }).session?.configureLockBackground;
+  // Compatibility with the locally installed pre-generic compositor.
+  const legacy = (globalThis as { __SHOJI_LOCK_BACKGROUND__?: (mate: boolean) => boolean }).__SHOJI_LOCK_BACKGROUND__;
+  const pet = petWindow(wm);
+  const mate = !!pet && !pet.state[WINDOW_STATE_MINIMIZED]() && screensaver.enabled
+    && Date.now() - screensaver.updated < 1500;
+  const wallpaperLayers = Object.values(COMPOSITOR.layer.current)
+    .filter(layer => layer.namespace === "linux-wallpaperengine");
+  const locked = typeof configure === "function"
+    ? configure({ windowIds: mate && pet ? [pet.id] : [], layerIds: wallpaperLayers.map(layer => layer.id) })
+    : typeof legacy === "function" && legacy(mate);
+  const rect = mate && pet ? windowRect(pet) : null;
+  const backgroundOutputs = COMPOSITOR.output.outputs.filter(output =>
+    wallpaperLayers.some(layer => layer.outputName === output.name)
+    || (locked && rect && output.resolution && rect.x < output.position.x + output.resolution.width / output.scale
+      && rect.y < output.position.y + output.resolution.height / output.scale
+      && rect.x + rect.width > output.position.x && rect.y + rect.height > output.position.y))
+    .map(output => output.name);
+  return { native: typeof configure === "function" || typeof legacy === "function",
+    locked, mateEngine: locked && mate, backgroundOutputs };
+}
 
 export function petKeepsDockVisible(monitor: string, wm: HybridWindowManager): boolean {
   const pet = petWindow(wm);
@@ -121,7 +148,15 @@ export function registerMateEngineIpc(
   });
 
   ipc.handle("mateengine.state", (params) => {
-    const request = params as { seat?: unknown; probe?: { x?: unknown; y?: unknown } | null } | undefined;
+    const request = params as { seat?: unknown; probe?: { x?: unknown; y?: unknown } | null;
+      screensaver?: { timeout?: unknown; enabled?: unknown } } | undefined;
+    if (request?.screensaver) {
+      const { timeout, enabled } = request.screensaver;
+      if (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 30 || timeout > 10800 ||
+          typeof enabled !== "boolean") throw new TypeError("invalid screensaver request");
+      const changed = screensaver.timeout !== timeout || screensaver.enabled !== enabled;
+      screensaver = { timeout, enabled, revision: screensaver.revision + Number(changed), updated: Date.now() };
+    }
     if (request && Object.prototype.hasOwnProperty.call(request, "seat")) {
       const target = request.seat;
       const probe = request.probe;
@@ -132,7 +167,8 @@ export function registerMateEngineIpc(
       seating = { target: target as string | null, probe: probe as { x: number; y: number } | null, updated: Date.now() };
     }
     const window = petWindow(wm);
-    const visibleSurfaces = surfaces(wm, zIndex);
+    const lockScene = mateEngineLockScene(wm);
+    const visibleSurfaces = lockScene.locked ? [] : surfaces(wm, zIndex);
     const petZ = window ? zIndex(window) : Infinity;
     let covered = pointer !== null && visibleSurfaces.some(surface => surface.visible && !surface.self && !surface.dock &&
       surface.z > petZ && contains(surface.visualRect ?? surface.rect, pointer!));
@@ -146,14 +182,33 @@ export function registerMateEngineIpc(
     }
     return {
       window: window ? windowRect(window) : null,
-      windowVisible: !!window && window.state[WINDOW_STATE_WORKSPACE_VISIBLE]() && !window.state[WINDOW_STATE_MINIMIZED](),
+      windowVisible: !!window && (lockScene.locked || window.state[WINDOW_STATE_WORKSPACE_VISIBLE]()) && !window.state[WINDOW_STATE_MINIMIZED](),
+      sessionLocked: lockScene.locked,
       seatingVersion: 4,
       moving: window ? wm.isMovingWindow(window) : false,
-      pointer,
+      pointer: lockScene.locked ? null : pointer,
       outputs: outputs(),
       surfaces: visibleSurfaces,
-      covered,
+      covered: lockScene.locked || covered,
+      screensaver: lockScene.mateEngine ? { timeout: screensaver.timeout, enabled: true, idle: true }
+        : idleFeedback && Date.now() - idleFeedback.updated < 1500 &&
+        idleFeedback.revision === screensaver.revision ?
+        { timeout: screensaver.timeout, enabled: screensaver.enabled, idle: idleFeedback.idle } : null,
     };
+  });
+
+  ipc.handle("mateengine.idle", (params) => {
+    const request = params as { revision?: unknown; idle?: unknown } | undefined;
+    if (typeof request?.revision !== "number" || !Number.isSafeInteger(request.revision) ||
+        typeof request.idle !== "boolean") throw new TypeError("invalid desktop idle report");
+    const pet = petWindow(wm);
+    const enabled = Date.now() - screensaver.updated < 1500 && !!pet &&
+      pet.state[WINDOW_STATE_WORKSPACE_VISIBLE]() && !pet.state[WINDOW_STATE_MINIMIZED]() && screensaver.enabled;
+    if (screensaver.enabled && !enabled)
+      screensaver = { ...screensaver, enabled: false, revision: screensaver.revision + 1 };
+    if (request.revision === screensaver.revision)
+      idleFeedback = { revision: request.revision, idle: enabled && request.idle, updated: Date.now() };
+    return { timeout: screensaver.timeout, enabled, revision: screensaver.revision };
   });
 
   ipc.handle("mateengine.move", (params) => {

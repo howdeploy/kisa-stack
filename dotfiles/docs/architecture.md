@@ -41,6 +41,21 @@ primary output. `ScreenShell.qml` builds the top panel, tray, popups and dock UI
 `Keyboard.qml` and `Notifications.qml` expose local system state; `ControlCentre.qml`
 and its children invoke explicit local controls.
 
+`SystemSettings.qml` owns settings state and IPC; `SystemSettingsDrawer.qml` loads
+`SystemSettingsContent.qml` for the selected output. The compositor's
+`src/system-settings.ts` validates changes and rolls back unconfirmed display
+trials. `Lock.qml` owns the Wayland session lock and PAM password lifetime;
+`LockFace.qml` renders each output and `LockPreview.qml` uses a mock controller.
+`MotionIcon.qml` adapts the licensed SL UI geometry and motion to native Qt Shapes.
+See [source attribution](../config/shoji-shell/SL-UI-SOURCES.md).
+
+`LockScene.qml` coordinates native background availability and the post-PAM
+snapshot handoff with `shojiwm/src/lock-scene.ts`. The compositor patch filters
+locked rendering to the lock surface, Wallpaper Engine roots and the selected
+MateEngine root. Ordinary desktop windows and their input remain excluded.
+The unlock transition reuses `live-wallpaper-wave.frag` through an expiring
+output overlay, not a second wallpaper renderer. See [rollout limits](lock-scene.md).
+
 The wallpaper pipeline is `Wallpapers.qml` (library/state) → `WallpaperPicker.qml`
 (choice and previews) → `WallpaperTransition.qml` (two images and progress).
 `WidgetLayouts.qml` defines sets/positions and registers transitions per output.

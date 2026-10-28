@@ -13,6 +13,8 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 | `Super+Return` | Ghostty |
 | `Super+Space` | Walker |
 | `Super+E` | Dolphin |
+| `Super+I` | System settings on the output under the pointer |
+| `Super+L` | Lock the session |
 | `Super+W` | Wallpaper and widget preset picker |
 | `Super+Shift+S` | Screenshot editor on the current monitor |
 | `Super+Q` | Close focused window |
@@ -32,8 +34,11 @@ autostart a VPN or reference the author's application profiles.
 ## Monitors, wallpaper and presets
 
 The compositor discovers connected outputs, extends them automatically, chooses
-their best mode and uses scale 1. Change `COMPOSITOR.output.configure` for different
-scaling, ordering or modes. The shell defaults to the first available output for
+their best mode and uses scale 1. `Super+I` opens monitor, keyboard, pointer,
+audio, connection, wallpaper and lock settings. Monitor changes require confirmation
+within 20 seconds or revert. Defaults and validation live in `src/system-settings.ts`;
+the shell saves settings in private `shoji-shell/system-settings.json`.
+The shell defaults to the first available output for
 the panel and desktop controls. Set `SHOJI_PRIMARY_OUTPUT` in the installed
 `shoji-shell/integrations.env` to select a specific output.
 
@@ -63,6 +68,34 @@ position appears. Preserve this lifecycle when adding presets.
 The optional weather panel is separate from the preset widget maps and is hidden
 for the empty preset. It requires two user-configured locations.
 
+Recognized Steam, Minecraft and OpenMW game windows initially use the leftmost
+output; edit `shojiwm/src/game-placement.ts` to change this policy or add other
+app IDs. Minecraft fullscreen reserves 80 logical pixels for the dock.
+
+## Lock screen
+
+`Super+L` uses Quickshell's Wayland session lock and PAM service `login` for the
+current user. Lock settings include a preview, per-output wallpaper, an idle-lock
+timer (10 minutes by default) and screen-power timeout while locked (5 minutes).
+Automatic locking requires the fork's DPMS API; manual locking remains available.
+The preview uses a separate mock controller and does not authenticate.
+
+The optional native lock-scene integration draws the current animated wallpaper
+and MateEngine's enabled Big Screen screensaver underneath the password UI.
+After PAM success, a 680ms wave replaces the captured lock scene with the live
+desktop on available outputs. It requires the pinned compositor with its generic
+lock API and, for MateEngine, the [matching bridge rebuild](mateengine.md);
+it is not enabled by copying QML alone. See
+[lock-scene integration and rollout limits](lock-scene.md).
+
+The public copy has not been exercised for password authentication, unlock or
+DPMS recovery. PAM policies differ between distributions; keep an independent
+working session available for the first deliberate lock/unlock check.
+
+Live wallpapers require a separate engine and locally owned content; see
+[wallpaper engine patches](wallpaper-engine.md). The helper's private-library
+lookup does not build or install those libraries automatically.
+
 ## Appearance and icons
 
 `shoji-shell/Theme.qml` owns the Mocha palette, mauve accent and Noto Sans UI font.
@@ -73,6 +106,9 @@ cursor uses `XCURSOR_THEME` or Adwaita; personal cursor assets are not bundled.
 The `Shoji` icon theme inherits Papirus Dark. Add custom flat SVG app icons under
 `$XDG_DATA_HOME/icons/Shoji/scalable/apps/`, named for the application's `Icon=` value.
 Only the theme index is supplied; no installed application desktop files are copied.
+The default dock pins Ghostty and Dolphin. Missing desktop entries are hidden.
+Add optional app IDs locally after installing those applications; the reference
+software inventory is in [dependencies](../dependencies/README.md).
 Lucide remains the separate monochrome set for system controls.
 
 Quickshell chooses Shoji via its pragma. For GTK/Walker, select Shoji in your theme

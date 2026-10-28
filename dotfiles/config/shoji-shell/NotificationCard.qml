@@ -8,7 +8,7 @@ Rectangle {
     id: card
     required property var notification
     color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.035)
-    radius: 8
+    radius: Theme.surfaceRadius
     border.width: 1
     border.color: notification && notification.urgency === NotificationUrgency.Critical
         ? Theme.danger : Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.07)
@@ -21,7 +21,10 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
             Rectangle {
-                implicitWidth: 32; implicitHeight: 32; radius: 6
+                implicitWidth: 32; implicitHeight: 32; radius: Theme.surfaceRadius
+                scale: iconHover.hovered && !Theme.reducedMotion ? 1.06 : 1
+                HoverHandler { id: iconHover }
+                Behavior on scale { NumberAnimation { duration: Theme.duration(340); easing.type: Easing.OutCubic } }
                 color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.05)
                 Image {
                     id: appIcon

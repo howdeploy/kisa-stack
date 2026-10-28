@@ -1,0 +1,3 @@
+# Optional account-widget adapters. This does not install or log into any account.
+nodejs
+github-cli

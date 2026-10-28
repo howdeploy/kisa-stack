@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -91,8 +90,6 @@ Item {
                 icon.source: Qt.resolvedUrl("icons/clear.svg")
                 hint: "Очистить записи GitHub в виджете"
                 enabled: !!root.snapshot.login && root.recent.length > 0
-                ToolTip.visible: hovered
-                ToolTip.text: hint
                 onClicked: {
                     root.clearedAt = Object.assign({}, root.clearedAt, { [root.snapshot.login]: Date.now() });
                     dismissalState.setText(JSON.stringify({ clearedAt: root.clearedAt }, null, 4) + "\n");

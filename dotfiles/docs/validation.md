@@ -1,5 +1,91 @@
 # Validation record
 
+## 2026-10-28 publication completeness follow-up
+
+The source publication now pins ShojiWM `d78b72a` directly, includes installed
+repository/foreign/Flatpak application inventories, removes unavailable dock
+pins, and supplies a complete private wallpaper engine/CEF/mpv build path.
+The installer checks desktop prerequisites and validates a wallpaper bundle
+before backing up an existing runtime. The helper bypasses system launcher
+wrappers when using that private runtime.
+
+The media patch now includes PR #711's asynchronous revision `afeb74d`;
+the earlier synchronous ASan/build results do not validate it. The optional
+MateEngine pin is now public `34136f2`, including the accumulated Linux/voice
+updates. Its earlier lock-only patch export against `211ba1d` is archival.
+Source pins, launch/install paths and publication
+scope were reviewed. Tests were added for launch selection and bundle
+replacement/rejection, but were not run. No build, lint, typecheck, installation,
+session reload, player launch or graphical check was performed for this update.
+The staged privacy scan covered 378 publication files with zero findings.
+Engine/media, mpv and MateEngine patches passed `git apply --check` against
+their pinned source snapshots in temporary directories. These are source and
+publication checks, not a runtime test.
+
+## 2026-10-28 generic lock API publication
+
+The compatibility fork main now contains commit
+[`d78b72a`](https://github.com/howdeploy/ShojiWM/commit/d78b72a4971068e37b31ea67dd2eff760fb04281).
+The generic port to upstream main `44e8ce9` is
+[draft PR #163](https://github.com/bea4dev/ShojiWM/pull/163), head `27fe62a`.
+The local patch export includes the same compatibility-fork changes against the
+existing `031f051` pin. The public TS adapter supports the new exact-runtime-ID
+API and the earlier installed implementation.
+
+This publication involved source/diff and remote-ref review, not builds, tests,
+typechecking or runtime validation. A focused native ID-validation/owner-lifecycle
+check is included but has not been run. The installed compositor and live WM
+adapter were retained; the user's successful background/screensaver checks
+apply to the earlier corrected local implementation.
+
+Current upstream source already handles layer ordering, per-layer damage,
+frame callbacks/presentation feedback, and explicit-sync/NVIDIA buffer holds.
+No additional compositor video-wallpaper fix was identified by source review.
+The earlier media-memory patches remain changes to linux-wallpaperengine/mpv.
+
+## 2026-10-28 first lock attempt: compositor deadlock
+
+The user reported a freeze immediately after Super+L. The compositor log ended
+at 07:44:34 Europe/Moscow, while system services continued until 07:49. The kernel
+journal contained no corresponding GPU fault or OOM kill. Source review found
+a self-deadlock in the newly added lock wallpaper renderer: it retained the
+output LayerMap guard across a helper that locks the same map. The shared
+TTY/winit path now collects owned layer handles before rendering and releases
+the mutex first. No hung-process stack was available. Runtime validation of the
+correction is pending; no lock/authentication/DPMS test was run by the agent.
+The corrected locked/offline release build passed in 3m07s and was installed
+locally. The installed binary matched its build artifact by SHA256. No session
+or process was restarted. The public compositor patch contains the same fix.
+
+## 2026-10-28 lock-scene build and local installation
+
+With explicit permission, the native compositor patch built successfully using
+Rust 1.94.0, `--locked --offline --release`, with one build job. The managed-only
+MateEngine application and bridge compiled; the existing patcher retained all
+47 bridge call sites. Bun bundled 19 config modules, and Qt's bytecode compiler
+compiled `Lock.qml`, `LockFace.qml` and `LockScene.qml`.
+
+The new compositor, changed SDK file, managed DLLs and live QML/TS configuration
+were installed with backups. Installed files matched their build artifacts.
+The current compositor process was not restarted; no MateEngine player was
+started or restarted. Runtime, visual, password, lock/unlock and DPMS tests
+remain deferred to the user's session restart. This is not fresh-machine or
+cross-GPU validation of the published bundle.
+
+## 2026-10-28 source update
+
+Selected live ShojiWM/Quickshell sources were compared with the existing public
+copy. Personal paths, account gates, empty-first presets, neutral artwork and
+portable startup scripts were preserved. The public fork's `main` head matched
+the new pinned revision when checked with `git ls-remote`.
+
+The source diff, new icon references, runtime-state exclusions and third-party
+notices were inspected. No automated privacy checker, tests, build, lint,
+typecheck, installer run or graphical check was executed for this update.
+PAM authentication, unlock and DPMS recovery in the sanitized copy remain unverified.
+Wallpaper patch provenance and earlier local validation are described separately
+in [wallpaper-engine.md](wallpaper-engine.md); those results are not a test of this bundle.
+
 ## 2026-10-04 source update
 
 Selected live desktop source was exported into the publication tree. The privacy

@@ -21,12 +21,13 @@ import {
   layerSource,
   ManagedWindow,
   read,
-  type DisplayConfigDraft,
   compilePopupEffect,
   popupSource,
 } from "shoji_wm";
 import type { CompositionRenderable, ManagedWindowRect } from "shoji_wm/types";
 import { createIpcServer } from "shoji_wm/ipc";
+import { registerSystemSettings } from "./system-settings";
+import { registerLockSceneIpc } from "./lock-scene";
 import {
   HybridWindowManager,
   isMateEngineWindow,
@@ -61,7 +62,7 @@ import { wallpaperWaveEffect, setWallpaperWave, stopWallpaperWave } from "./effe
 import { snowEffect, startSnow, stopSnow } from "./effect/snow";
 import { registerScreenShaderIpc, screenShaderPickerMapped, screenShaderPickerClosed, stopRetroScreen } from "./effect/retro-screen";
 import { aquariumMistEffect } from "./effect/aquarium";
-import { petKeepsDockVisible, registerMateEngineIpc } from "./mateengine";
+import { petKeepsDockVisible, registerMateEngineIpc, mateEngineLockScene } from "./mateengine";
 
 const home = COMPOSITOR.env.get("HOME")!;
 const configHome = COMPOSITOR.env.get("XDG_CONFIG_HOME") || `${home}/.config`;
@@ -97,12 +98,14 @@ const HOT_RELOAD_WINDOW_MANAGER_STATE = "config.hybrid-window-manager";
 const FULLSCREEN_Z_INDEX = 2_000_000_000;
 const FLOATING_WINDOW_Z_INDEX_BASE = 1_500_000_000;
 const WINDOW_STACK_Z_INDEX_RANGE = 100_000_000;
+// The bridge places the dock one slot below the pet; both must clear every window.
+const MATEENGINE_Z_INDEX = FULLSCREEN_Z_INDEX + WINDOW_STACK_Z_INDEX_RANGE + 3;
 const FOCUSED_TILED_WINDOW_Z_INDEX = 1_000_000_000;
 const REORDERING_TILED_WINDOW_Z_INDEX = -2_000_000_000;
 
 // Shared by rendering and the pet's window/occlusion snapshot.
 function compositorWindowZIndex(window: WaylandWindow): number {
-  if (isMateEngineWindow(window)) return FULLSCREEN_Z_INDEX - 1;
+  if (isMateEngineWindow(window)) return MATEENGINE_Z_INDEX;
   const stack = HYBRID_WINDOW_MANAGER.getWindowZIndex(window)();
   if (HYBRID_WINDOW_MANAGER.isWindowAboveFullscreen(window)) {
     return FULLSCREEN_Z_INDEX + 1 + Math.max(0, Math.min(WINDOW_STACK_Z_INDEX_RANGE, stack));
@@ -152,6 +155,23 @@ COMPOSITOR.onEnable((event) => {
 //   dock.proximity           { monitor: string, inside: bool }    (broadcast)
 // ---------------------------------------------------------------------------
 const WORKSPACE_IPC = createIpcServer();
+const OUTPUT_POWER = COMPOSITOR.output as typeof COMPOSITOR.output & {
+  setPower?: (power: "on" | "off", options?: { wakeOnInput?: boolean }) => void;
+};
+function outputPowerAvailable(): boolean {
+  return typeof OUTPUT_POWER.setPower === "function"
+    && typeof (globalThis as { __SHOJI_OUTPUT_POWER__?: unknown }).__SHOJI_OUTPUT_POWER__ === "function";
+}
+WORKSPACE_IPC.handle("output.power.available", () => ({ available: outputPowerAvailable() }));
+WORKSPACE_IPC.handle("output.power", (params) => {
+  const request = params as { power?: unknown; wakeOnInput?: unknown } | undefined;
+  if (request?.power !== "on" && request?.power !== "off") {
+    throw new TypeError('output.power requires power "on" or "off"');
+  }
+  if (!outputPowerAvailable()) throw new Error("DPMS requires the updated ShojiWM binary and SDK");
+  OUTPUT_POWER.setPower!(request.power, { wakeOnInput: request.wakeOnInput === true });
+  return { queued: true };
+});
 registerScreenShaderIpc(WORKSPACE_IPC, (name) => {
   const output = COMPOSITOR.output.current[name];
   if (!output?.resolution || output.scale <= 0) return null;
@@ -172,6 +192,7 @@ registerScreenShaderIpc(WORKSPACE_IPC, (name) => {
   };
 });
 registerMateEngineIpc(WORKSPACE_IPC, HYBRID_WINDOW_MANAGER, compositorWindowZIndex);
+registerLockSceneIpc(WORKSPACE_IPC, () => mateEngineLockScene(HYBRID_WINDOW_MANAGER));
 let keyboardLayout: { index: number; name: string } | null = null;
 WORKSPACE_IPC.handle("keyboard.get", () => keyboardLayout);
 // Optional until the compositor is restarted into the event-based API.
@@ -427,6 +448,13 @@ COMPOSITOR.key.bind("dolphin", "Super+E", () => {
   COMPOSITOR.process.spawn({ command: "dolphin" });
 });
 
+COMPOSITOR.key.bind("lock-screen", "Super+L", () => {
+  COMPOSITOR.process.spawn({ command: [
+    "quickshell", "ipc", "--path", `${configHome}/shoji-shell`,
+    "call", "session", "lock",
+  ] });
+});
+
 COMPOSITOR.key.bind("mute", "XF86AudioMute", () => {
   COMPOSITOR.process.spawn({ command: "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" });
 });
@@ -443,6 +471,12 @@ function toggleLauncher() {
   });
 }
 COMPOSITOR.key.bind("launcher", "Super+Space", toggleLauncher);
+COMPOSITOR.key.bind("system-settings", "Super+I", () => {
+  COMPOSITOR.process.spawn({ command: [
+    "quickshell", "ipc", "--path", `${configHome}/shoji-shell`,
+    "call", "settings", "toggle", settingsOutput(),
+  ] });
+});
 COMPOSITOR.key.bind("wallpaper-picker", "Super+W", () => {
   COMPOSITOR.process.spawn({ command: [
     "quickshell", "ipc", "--path", `${configHome}/shoji-shell`,
@@ -533,45 +567,7 @@ COMPOSITOR.key.bind("profile", "Super+Shift+T", () => {
   COMPOSITOR.debug.enableProfile(profileEnabled);
 });
 
-COMPOSITOR.output.configure((context) => {
-  const display: DisplayConfigDraft = {};
-
-  for (const output of context.connected) {
-    display[output.name] = {
-      mode: "extend",
-      resolution: "best",
-      position: "auto",
-      scale: 1,
-    };
-  }
-
-  return display;
-});
-
-COMPOSITOR.input.configure((input, _context) => {
-  input.global = {
-    touchpad: {
-      tapToClick: true,
-      naturalScroll: true,
-      scrollMethod: "twoFinger",
-      disableWhileTyping: true,
-      scrollFactor: 0.3,
-    },
-    pointer: {
-      pointerAccel: 0.0,
-      accelProfile: "flat",
-      motionSpace: "logical",
-    },
-    keyboard: {
-      layout: "us,ru",
-      variant: ",ruintl_ru",
-      options: "grp:alt_shift_toggle",
-      repeatRate: 60,
-      repeatDelay: 250,
-    },
-  };
-
-});
+const settingsOutput = registerSystemSettings(WORKSPACE_IPC, () => HYBRID_WINDOW_MANAGER.getCurrentMonitorName());
 
 HYBRID_WINDOW_MANAGER.configureWorkspaceGestureSpeed({
   workspaceScrollFactor: 1.5,
@@ -883,14 +879,13 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
     () => !window.state[WINDOW_STATE_MINIMIZED]() && !inactive(),
   );
 
-  // MateEngine: bare client in its own movable rect (no chrome), above other
-  // windows and below fullscreen clients. Clicks pass through via the client
-  // input region.
+  // MateEngine shares its above-fullscreen order with the bridge's seating and
+  // occlusion snapshot. Clicks pass through via the client input region.
   if (isMateEngineWindow(window)) {
     return (
       <ManagedWindow
         rect={managedRect}
-        zIndex={FULLSCREEN_Z_INDEX - 1}
+        zIndex={zIndex}
         visibleOutputs={window.state[WINDOW_STATE_VISIBLE_OUTPUTS]}
         opacity={workspaceOpacity}
         forceRectSize={true}
@@ -1011,12 +1006,12 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
     );
   }
 
-  // Fullscreen: drop all chrome (titlebar, border, rounded corners) and let
-  // the client surface fill its managed rect edge to edge. The rect is set to
-  // the whole output by onWindowFullscreenRequest. Rendering nothing but the
-  // bare ClientWindow is also what lets the tty backend promote the client
+  // Native fullscreen and Minecraft's Super+F drop all compositor chrome.
+  // The client fills its managed rect, keeping Minecraft's bottom dock gap.
+  // Rendering only the bare ClientWindow also lets the tty backend promote the client
   // buffer to the primary plane (direct scanout).
-  if (window.state[WINDOW_STATE_FULLSCREEN]() && !window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]()) {
+  if (window.state[WINDOW_STATE_FULLSCREEN]() &&
+      (!window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() || window.appId() === "com.mojang.minecraft")) {
     return (
       <ManagedWindow
         rect={managedRect}

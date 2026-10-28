@@ -25,12 +25,13 @@ import {
   type WindowResizeRect,
 } from "shoji_wm";
 import type { ManagedWindowRect, WindowSizeConstraints } from "shoji_wm/types";
+import { gameMonitorForApp } from "./game-placement";
 import { playRectAnimation, stopRectAnimation, LAYOUT_TRANSITION_EASING, LAYOUT_TRANSITION_DURATION } from "./window-animation";
 import { startLayoutMelt } from "./effect/layout-melt";
 import { beginWorkspaceWave, finishWorkspaceWave, setWorkspaceWaveProgress, stopWorkspaceWave, WORKSPACE_WAVE_DURATION, WORKSPACE_WAVE_EASING } from "./effect/workspace-wave";
 import { playWindowWave, windowWaveClosedProgress, WINDOW_DISSOLVE_DURATION } from "./effect/window-wave";
 import { updateDragJelly, stopDragJelly } from "./effect/window-drag-jelly";
-import { updateMonitorPortal } from "./effect/monitor-portal";
+import { updateMonitorPortal, stopMonitorPortals } from "./effect/monitor-portal";
 
 export type SnapZone =
   | "maximize"
@@ -426,6 +427,8 @@ const WORKSPACE_VISUAL_RECT_ANIMATION_CHANNEL = `${WORKSPACE_VISUAL_ANIMATION_CH
 const WORKSPACE_VISUAL_OPACITY_ANIMATION_CHANNEL = `${WORKSPACE_VISUAL_ANIMATION_CHANNEL}.opacity`;
 export const WINDOW_BORDER_PX = 2;
 export const TITLEBAR_HEIGHT = 30;
+// Logical pixels: the 72 px bottom dock plus an 8 px gap above it.
+const MINECRAFT_FULLSCREEN_DOCK_GAP = 80;
 export const MAXIMIZED_WINDOW_PADDING = {
   top: 8,
   right: 8,
@@ -888,15 +891,17 @@ export class HybridWindowManager {
     }
 
     let restoredExistingWindow = false;
+    const gameMonitor = gameMonitorForApp(window.appId(), COMPOSITOR.output.outputs);
     const notificationMonitor = isSteamNotificationWindow(window)
       ? [...COMPOSITOR.output.list].sort((a, b) =>
         COMPOSITOR.output.current[b].position.x - COMPOSITOR.output.current[a].position.x,
       )[0]
       : undefined;
+    const placementMonitor = gameMonitor ?? notificationMonitor;
     const restoringWorkspace = this.findWorkspaceRestoringWindow(window);
     let workspace =
       restoringWorkspace
-      ?? (notificationMonitor ? this.workspaceForMonitor(notificationMonitor) : this.getCurrentWorkspace());
+      ?? (placementMonitor ? this.workspaceForMonitor(placementMonitor) : this.getCurrentWorkspace());
     if (!restoringWorkspace && workspace && !window.isTransient()
       && window.appId()?.toLowerCase() === "canvastty") {
       workspace = this.ensureWorkspace(workspace.monitor, 4);
@@ -938,7 +943,7 @@ export class HybridWindowManager {
     // as a failed switch and leaves fullscreen ~1s later, which is why the
     // first entry into fullscreen only sometimes took.
     if (window.state[WINDOW_STATE_FULLSCREEN]() || window.isFullscreen()) {
-      const fullscreenRect = this.fullscreenRectForWindow(window);
+      const fullscreenRect = this.fullscreenRectForWindow(window, gameMonitor ? workspace?.monitor : undefined);
       window.state[WINDOW_STATE_FULLSCREEN].set(true);
       stopRectAnimation(window, WINDOW_STATE_RECT);
       window.state[WINDOW_STATE_RECT].set(fullscreenRect);
@@ -1115,7 +1120,7 @@ export class HybridWindowManager {
   }
 
   public onStartClose(window: WaylandWindow) {
-    if (this.clientDrag?.window.id === window.id) this.endClientDrag();
+    this.cancelWindowDrag(window);
     stopRectAnimation(window, WINDOW_STATE_RECT);
     scheduleCloseAnimation(window);
 
@@ -1132,6 +1137,7 @@ export class HybridWindowManager {
   }
 
   public onClose(window: WaylandWindow) {
+    this.cancelWindowDrag(window);
     this.presentedWindowIds.delete(window.id);
     this.lastRestoreAtMs.delete(window.id);
     this.restoredDuringInitialConfigure.delete(window.id);
@@ -1390,6 +1396,30 @@ export class HybridWindowManager {
     this.clientDragExpiry = null;
     if (this.clientDrag) this.updateClientDragPortal(this.clientDrag.window, "end");
     this.clientDrag = null;
+  }
+
+  private cancelWindowDrag(window: WaylandWindow) {
+    if (this.clientDrag?.window.id === window.id) this.endClientDrag();
+    let cancelled = false;
+    if (this.floatingDrag?.window.id === window.id) {
+      this.floatingDrag = null;
+      cancelled = true;
+    }
+    if (this.tileDrag?.window.id === window.id) {
+      this.emitSnapPreview(this.tileDrag.workspace.monitor, null, "tiling");
+      this.tileDrag = null;
+      cancelled = true;
+    }
+    if (this.maximizedMoveDrag?.windowId === window.id) {
+      this.maximizedMoveDrag = null;
+      cancelled = true;
+    }
+    if (this.floatingSnap?.windowId === window.id) this.clearFloatingSnapPreview();
+    if (cancelled) {
+      this.isGrabbing = false;
+      stopDragJelly(window);
+      stopMonitorPortals();
+    }
   }
 
   /** True while the user drags this floating window (e.g. Super+drag). */
@@ -2045,8 +2075,10 @@ export class HybridWindowManager {
 
   public hasChromeFullscreen(monitor: string): boolean {
     if (!COMPOSITOR.output.current[monitor]) return false;
+    // The shell also lowers its top panel for Minecraft's native F11 fullscreen.
     return this.windowsOnMonitor(monitor).some((window) =>
-      window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() &&
+      (window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() ||
+        (window.appId() === "com.mojang.minecraft" && window.state[WINDOW_STATE_FULLSCREEN]())) &&
       !window.state[WINDOW_STATE_MINIMIZED](),
     );
   }
@@ -2139,10 +2171,15 @@ export class HybridWindowManager {
 
   private moveDraggedWindowToWorkspace(targetIndex: number) {
     const drag = this.floatingDrag ?? this.tileDrag;
-    if (!drag || drag.workspace.index === targetIndex) {
+    if (!drag) return;
+    const { window, workspace: fromWorkspace } = drag;
+    // A close can end the native grab before its final move event arrives.
+    // Never recreate that window from a retained drag reference.
+    if (!fromWorkspace.hasWindow(window)) {
+      this.cancelWindowDrag(window);
       return;
     }
-    const { window, workspace: fromWorkspace } = drag;
+    if (fromWorkspace.index === targetIndex) return;
     const toWorkspace = this.ensureWorkspace(fromWorkspace.monitor, targetIndex);
     const rect = window.state[WINDOW_STATE_RECT]();
 
@@ -3110,34 +3147,20 @@ export class HybridWindowManager {
     return rect;
   }
 
-  // Fullscreen covers the entire output: unlike maximize it ignores the
-  // usable area (exclusive-zone bars) and applies no padding, so the client
-  // surface spans edge to edge. This is also what lets the tty backend
-  // collapse the frame to a single scanout-capable element.
+  // Fullscreen ignores upper-panel reservations. Minecraft leaves room below
+  // its client for the dock; use the same geometry when restoring a workspace.
   private fullscreenRectForWindow(
     window: WaylandWindow,
     preferredOutput?: string,
   ): ManagedWindowRect {
     const rect = window.state[WINDOW_STATE_RECT]();
-    if (window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()) return allOutputsRect(rect);
     const centerX = read(rect.x) + read(rect.width) / 2;
     const centerY = read(rect.y) + read(rect.height) / 2;
     const outputName =
       preferredOutput ??
       this.outputNameAt(centerX, centerY) ??
       this.currentMonitor;
-    const output = outputName
-      ? COMPOSITOR.output.current[outputName]
-      : undefined;
-    if (output?.resolution) {
-      return {
-        x: output.position.x,
-        y: output.position.y,
-        width: output.resolution.width / output.scale,
-        height: output.resolution.height / output.scale,
-      };
-    }
-    return rect;
+    return fullscreenRectForOutput(window, outputName);
   }
 
   public onWindowFullscreenRequest(event: WindowFullscreenRequestEvent, withChrome = false, allOutputs = false) {
@@ -3207,9 +3230,10 @@ export class HybridWindowManager {
         window.state[WINDOW_STATE_FULLSCREEN_RESTORE_RECT].set(currentRect);
       }
     }
+    const gameMonitor = gameMonitorForApp(window.appId(), COMPOSITOR.output.outputs);
     const fullscreenRect = this.fullscreenRectForWindow(
       window,
-      event.outputName,
+      gameMonitor ? (workspace?.monitor ?? gameMonitor) : event.outputName,
     );
     window.state[WINDOW_STATE_FULLSCREEN].set(true);
     workspace?.focusWindow(window);
@@ -5791,20 +5815,25 @@ export class Workspace {
   }
 
   private fullscreenRootRect(window: WaylandWindow): ManagedWindowRect {
-    if (window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()) {
-      return allOutputsRect(window.state[WINDOW_STATE_RECT]());
-    }
-    const monitor = COMPOSITOR.output.current[this.monitor];
-    if (monitor?.resolution) {
-      return {
-        x: monitor.position.x,
-        y: monitor.position.y,
-        width: monitor.resolution.width / monitor.scale,
-        height: monitor.resolution.height / monitor.scale,
-      };
-    }
-    return window.state[WINDOW_STATE_RECT]();
+    return fullscreenRectForOutput(window, this.monitor);
   }
+}
+
+function fullscreenRectForOutput(window: WaylandWindow, outputName?: string): ManagedWindowRect {
+  const fallback = window.state[WINDOW_STATE_RECT]();
+  const output = outputName ? COMPOSITOR.output.current[outputName] : undefined;
+  const rect = window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()
+    ? allOutputsRect(fallback)
+    : output?.resolution
+      ? {
+          x: output.position.x,
+          y: output.position.y,
+          width: output.resolution.width / output.scale,
+          height: output.resolution.height / output.scale,
+        }
+      : fallback;
+  if (rect === fallback || window.appId() !== "com.mojang.minecraft") return rect;
+  return { ...rect, height: Math.max(1, read(rect.height) - MINECRAFT_FULLSCREEN_DOCK_GAP) };
 }
 
 function allOutputsRect(fallback: ManagedWindowRect): ManagedWindowRect {

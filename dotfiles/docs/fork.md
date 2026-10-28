@@ -1,6 +1,23 @@
 # Fork and contribution provenance
 
-## Current desktop snapshot (2026-10-04)
+## Current desktop snapshot (2026-10-28)
+
+Use `main` at
+[`d78b72a4971068e37b31ea67dd2eff760fb04281`](https://github.com/howdeploy/ShojiWM/commit/d78b72a4971068e37b31ea67dd2eff760fb04281).
+The public branch head was checked on 2026-10-28. It includes the generic
+lock-background API and bounded unlock overlays, on top of the October 27
+DPMS/output-power, input/focus, dock deadlock and portal cleanup snapshot.
+The SDK also provides runtime input/output reconfiguration for the settings drawer.
+The build script reads this pin directly from `sources.json`.
+
+See the pinned [snapshot notes](https://github.com/howdeploy/ShojiWM/blob/031f05191619def3567cbaaa2b651bbd657831a7/DESKTOP-SNAPSHOT.md)
+for source and installed-binary provenance. No fresh build, tests or graphical
+checks were run while updating these dotfiles. The notes' binary comparison
+does not establish clean-machine reproducibility or validate this sanitized QML.
+The old `patches/shojiwm/lock-scene.patch` is retained as a source export against
+`031f051`; the current build does not apply it again to `d78b72a`.
+
+## Earlier desktop snapshot (2026-10-04)
 
 Use `main` at
 [`dcb73aa3165e1fb66fca8226f076f3183e38806c`](https://github.com/howdeploy/ShojiWM/commit/dcb73aa3165e1fb66fca8226f076f3183e38806c).

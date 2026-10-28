@@ -75,6 +75,8 @@ def targets(owner):
         if owner:
             stream_owner = owner if descendant(pid, owner) else 0
             kind = kind or "browser"
+        if kind == "mateengine" and mateengine_track(stream_owner).get("playing") is not True:
+            continue
         if stream_owner:
             matches.append((stream, stream_owner, kind))
     # ponytail: a shared browser stream may mix tabs; exact tab isolation needs a browser capture bridge.
@@ -113,23 +115,18 @@ def run(owner):
     selector = selectors.DefaultSelector()
     silence = np.zeros(BARS)
     next_scan = next_emit = 0
-    track_cache = {}
-    track_pid = 0
+    tracks = {}
     next_track = 0
 
     def emit(now):
-        nonlocal track_cache, track_pid, next_track
         state = captures.get(current)
         available = state is not None and now - state["last_audio"] < 1
         smoothed = state["smoothed"] if available else silence
         pid = current[2] if current and current[3] == "mateengine" else 0
-        if pid != track_pid or now >= next_track:
-            track_pid, next_track = pid, now + 0.5
-            track_cache = mateengine_track(pid) if pid else {}
         print(json.dumps({"pid": current[2] if current else 0, "ambiguous": ambiguous,
                           "source": current[3] if current else "",
                           "available": available, "bars": smoothed.round(3).tolist(),
-                          "track": track_cache}), flush=True)
+                          "track": tracks.get(pid, {})}), flush=True)
 
     def close_capture(source):
         capture = captures.pop(source)["process"]
@@ -188,17 +185,25 @@ def run(owner):
                         state["last_signal"] = state["last_audio"]
                     state["smoothed"][:] = np.maximum(levels, state["smoothed"] * 0.78)
             now = time.monotonic()
-            responsive = [source for source, state in captures.items() if now - state["last_audio"] < 1]
+            if now >= next_track:
+                next_track = now + 0.5
+                tracks = {source[2]: mateengine_track(source[2]) for source in captures
+                          if source[3] == "mateengine"}
+            # Unity mixes music and effects into one stream. Only the dance
+            # player's fresh metadata makes that stream a music candidate.
+            eligible = [source for source in captures if source[3] != "mateengine"
+                        or tracks.get(source[2], {}).get("playing") is True]
+            responsive = [source for source in eligible if now - captures[source]["last_audio"] < 1]
             # An uncorked stream can be silent. Hold activity briefly across beats.
             audible = [source for source in responsive if now - captures[source]["last_signal"] < 0.75]
             ambiguous = len(audible) > 1
-            if len(responsive) != len(captures) or ambiguous:
+            if len(responsive) != len(eligible) or ambiguous:
                 current = None
-            elif len(captures) == 1:
-                current = next(iter(captures))
+            elif len(eligible) == 1:
+                current = eligible[0]
             elif len(audible) == 1:
                 current = audible[0]
-            elif current not in captures:
+            elif current not in eligible:
                 current = None
             if now >= next_emit or (current, ambiguous) != previous or any(key.data == current for key, _ in events):
                 emit(now)

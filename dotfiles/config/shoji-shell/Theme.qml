@@ -13,4 +13,7 @@ Singleton {
     readonly property color line: "#585b70"
     readonly property color danger: "#f38ba8"
     readonly property string font: "Noto Sans"
+    readonly property int surfaceRadius: 10
+    readonly property bool reducedMotion: Quickshell.env("SHOJI_REDUCED_MOTION") === "1"
+    function duration(milliseconds) { return reducedMotion ? 0 : milliseconds; }
 }

@@ -1,5 +1,20 @@
 singleton Theme 1.0 Theme.qml
 singleton Settings 1.0 Settings.qml
+SettingsActionButton 1.0 SettingsActionButton.qml
+WallpaperSettings 1.0 WallpaperSettings.qml
+DesktopWallpaperSettings 1.0 DesktopWallpaperSettings.qml
+ConnectionsSettings 1.0 ConnectionsSettings.qml
+LockPreview 1.0 LockPreview.qml
+singleton SystemSettings 1.0 SystemSettings.qml
+SystemSettingsDrawer 1.0 SystemSettingsDrawer.qml
+SystemSettingsContent 1.0 SystemSettingsContent.qml
+SettingsRow 1.0 SettingsRow.qml
+SettingsChoice 1.0 SettingsChoice.qml
+SettingsField 1.0 SettingsField.qml
+SettingsToggle 1.0 SettingsToggle.qml
+singleton Lock 1.0 Lock.qml
+singleton LockScene 1.0 LockScene.qml
+LockFace 1.0 LockFace.qml
 singleton Services 1.0 Services.qml
 singleton Notifications 1.0 Notifications.qml
 singleton Dock 1.0 Dock.qml
@@ -12,11 +27,13 @@ ControlCentre 1.0 ControlCentre.qml
 DeviceRow 1.0 DeviceRow.qml
 DeviceList 1.0 DeviceList.qml
 ScreenShell 1.0 ScreenShell.qml
+MateEngineIdle 1.0 MateEngineIdle.qml
 singleton Media 1.0 Media.qml
 singleton Osd 1.0 Osd.qml
 singleton Keyboard 1.0 Keyboard.qml
 PanelSlider 1.0 PanelSlider.qml
 PanelIcon 1.0 PanelIcon.qml
+MotionIcon 1.0 MotionIcon.qml
 ConnectionTile 1.0 ConnectionTile.qml
 StatCard 1.0 StatCard.qml
 Brightness 1.0 Brightness.qml

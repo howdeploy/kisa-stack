@@ -15,7 +15,7 @@ RULES = {
     "private host": re.compile(r"\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b"),
     "personal absolute path": re.compile(r"/(?:home|Users)/[A-Za-z0-9_.-]+|/mnt/[A-Za-z0-9_.-]+"),
 }
-DISALLOWED = re.compile(r"(?:^|/)(?:auth\.json|hosts\.yml|integrations\.env|wallpapers\.json|\.env(?:\.[^/]+)?|.*\.(?:sqlite3?|db|log|pem|key|qsb|pyc)|.*(?:\.bak|\.backup).*)(?:$|/)")
+DISALLOWED = re.compile(r"(?:^|/)(?:auth\.json|hosts\.yml|integrations\.env|wallpapers\.json|system-settings\.json|\.env(?:\.[^/]+)?|.*\.(?:sqlite3?|db|log|pem|key|qsb|pyc)|.*(?:\.bak|\.backup).*)(?:$|/)")
 BINARY = {"dotfiles/config/shoji-shell/assets/panel-grain.png", "dotfiles/config/walker/themes/shoji/grain.png"}
 # Reviewed generated sprite sheets used by HomeMascots.js; no screenshots.
 BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v2/{digit}.png" for digit in range(10))

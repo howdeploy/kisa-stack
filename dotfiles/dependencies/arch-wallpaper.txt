@@ -1,0 +1,23 @@
+# Additional build dependencies for build-wallpaper-engine.sh; install arch.txt first.
+meson
+ninja
+patchelf
+ffmpeg
+libplacebo
+libass
+luajit
+glew
+glfw
+glm
+freeglut
+sdl2
+lz4
+zlib
+freetype2
+libxrandr
+libxinerama
+libxcursor
+libxi
+libxxf86vm
+dbus
+wayland-protocols

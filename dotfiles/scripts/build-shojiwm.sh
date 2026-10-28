@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-revision=dcb73aa3165e1fb66fca8226f076f3183e38806c
+revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["shojiwm"]["revision"])' "$root/sources.json")"
 mkdir -p "$root/.build"
 checkout="$(mktemp -d "$root/.build/shojiwm.XXXXXX")"
 git clone --branch main https://github.com/howdeploy/ShojiWM.git "$checkout"

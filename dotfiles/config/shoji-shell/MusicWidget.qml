@@ -32,7 +32,7 @@ Item {
     readonly property string source: player ? sourceName(player.metadata["xesam:url"])
         : playing && mateEngine ? "MateEngine" : ""
     readonly property bool playing: captureWanted && spectrumAvailable && capturePid > 1 && !ambiguousAudio
-        && (!mateEngine || mateTrack.playing === true || rawEnergy > 0.08)
+        && (!mateEngine || mateTrack.playing === true)
     property int capturePid: 0
     property string captureSource: ""
     readonly property bool mateEngine: captureSource === "mateengine"
@@ -48,9 +48,9 @@ Item {
     property bool spectrumAvailable: false
     // MPRIS may remain paused on another tab while Web Audio is already playing.
     readonly property bool captureWanted: visible
-    readonly property real rawEnergy: captureWanted && spectrumAvailable
+    readonly property real rawEnergy: playing
         ? Math.max.apply(Math, [0].concat(levels)) : 0
-    readonly property real bass: captureWanted && spectrumAvailable
+    readonly property real bass: playing
         ? Math.max.apply(Math, [0].concat(levels.slice(2, 9))) : 0
     property real energy: Math.max(0, (rawEnergy - 0.08) / 0.92)
     property real bassFloor: bass

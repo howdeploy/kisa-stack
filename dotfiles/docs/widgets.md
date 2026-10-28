@@ -19,6 +19,11 @@ sources this trusted shell file before starting Quickshell. Never source a stran
 integration file. It should contain flags, paths and optional weather locations,
 not API keys. Authentication remains owned by each locally installed CLI.
 
+For GitHub/Node adapters on Arch, `dependencies/arch-integrations.txt` lists the
+optional system packages. Install the chosen provider CLIs separately; that list
+does not install Codex/Grok/Kimi, Vast or Hermes. See the
+[software profiles](../dependencies/README.md). Enabling a flag is not a login.
+
 | Flag | Prerequisites and access after opt-in |
 | --- | --- |
 | `SHOJI_ENABLE_GITHUB=1` | `gh` logged into **your** account; reads notifications, PRs, issues and discussion replies. Does not mark notifications read. Writes a local cache. |

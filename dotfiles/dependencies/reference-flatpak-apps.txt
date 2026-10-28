@@ -1,0 +1,2 @@
+# Installed reference snapshot: 2026-10-28, Europe/Moscow.
+# Informational inventory; not an automatic installation list.

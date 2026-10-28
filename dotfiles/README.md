@@ -8,8 +8,8 @@ image or a backup of the author's home directory.
 
 **Use the [howdeploy/ShojiWM fork](https://github.com/howdeploy/ShojiWM/tree/main),
 branch `main`, at the revision in [sources.json](sources.json).** The
-configuration depends on fixes and APIs contributed by howdeploy. Fork `main`
-does not include them. See [fork and PR provenance](docs/fork.md).
+configuration depends on fixes and APIs contributed by howdeploy. Upstream
+`bea4dev/ShojiWM` is a different source tree. See [fork and PR provenance](docs/fork.md).
 
 ## Start here
 
@@ -23,15 +23,23 @@ does not include them. See [fork and PR provenance](docs/fork.md).
 4. For changes, use [architecture](docs/architecture.md), [shader guide](docs/shaders.md)
    and [AGENTS.md](AGENTS.md).
 
+The [software inventory and profiles](dependencies/README.md) list the recorded
+installed applications separately from the core desktop dependencies. Animated
+wallpapers have a [pinned private-runtime builder](docs/wallpaper-engine.md);
+MateEngine's lock screensaver has [matching published bridge sources](docs/mateengine.md).
+The default dock only pins installed Ghostty/Dolphin desktop entries.
+
 The first launch uses the **empty** preset and a bundled neutral SVG background.
 `Super+W` opens the wallpaper/preset picker. The original arrangements remain,
 joined by Home Zone and Gaming Home Zone; integrations stay absent until enabled.
 The UI currently retains the original Russian labels. Documentation is in English.
 
-The [October update](docs/update-2026-10-04.md) adds live wallpaper transitions,
-screen shader selection, snow/aquarium effects, clock mascots and MateEngine IPC.
-It preserves the working desktop's source while replacing personal paths and
-defaults. The sanitized update has not had a new build or graphical check.
+The [October 28 update](docs/update-2026-10-28.md) adds system settings, a PAM lock
+screen, animated native controls, compositor compatibility updates and source
+patches for wallpaper memory fixes. The [earlier October update](docs/update-2026-10-04.md)
+introduced wallpaper transitions, screen shaders, clock mascots and MateEngine IPC.
+The sanitized update, new engine builder and generic lock API have not had a new
+build or graphical check; source publication is not a verified binary release.
 
 ## Categories
 

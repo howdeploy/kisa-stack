@@ -4,11 +4,12 @@ import QtQuick.Controls
 Slider {
     id: slider
     from: 0; to: 1
+    property bool roundHandle: false
     implicitHeight: 28
     leftPadding: 0; rightPadding: 0
     background: Rectangle {
         x: slider.leftPadding + slider.handle.width / 2; y: (slider.height - height) / 2
-        width: slider.availableWidth - slider.handle.width; height: 3; radius: 1.5
+        width: slider.availableWidth - slider.handle.width; height: 4; radius: 2
         color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.09)
         Rectangle {
             width: parent.width * slider.visualPosition
@@ -18,9 +19,12 @@ Slider {
     handle: Rectangle {
         x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
         y: (slider.height - height) / 2
-        width: 16; height: 16; radius: 8
+        width: 20; height: 20; radius: slider.roundHandle ? 10 : slider.pressed ? 6 : 8
+        scale: slider.pressed && !Theme.reducedMotion ? 1.08 : 1
         color: slider.enabled ? Theme.accent : Theme.muted
         border.width: slider.visualFocus ? 1 : 0
         border.color: Theme.ink
+        Behavior on radius { NumberAnimation { duration: Theme.duration(280); easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: Theme.duration(220); easing.type: Easing.OutCubic } }
     }
 }

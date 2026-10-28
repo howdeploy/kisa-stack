@@ -24,10 +24,12 @@ xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
 quickshell
 qt6-base
+qt6-5compat
 qt6-declarative
 qt6-shadertools
 qt6-svg
 qt6-tools
+qt6-wayland
 gtk3
 gtk4
 gtk4-layer-shell
@@ -56,3 +58,4 @@ flameshot
 grim
 wl-clipboard
 ddcutil
+util-linux

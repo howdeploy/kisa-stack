@@ -264,9 +264,6 @@ Item {
                                 border.width: serviceIcon.visualFocus ? 1 : 0
                                 border.color: Theme.muted
                             }
-                            ToolTip.visible: hovered || visualFocus
-                            ToolTip.delay: 250
-                            ToolTip.text: root.statusHint(modelData)
                             onClicked: Qt.openUrlExternally(modelData.url)
                         }
                     }

@@ -21,49 +21,58 @@ Scope {
     onPanelOpenChanged: { if (panelOpen) panelLoader.active = true; }
     SystemClock { id: clock; precision: SystemClock.Minutes }
 
-    Socket {
-        id: dockSocket
-        path: Quickshell.env("XDG_RUNTIME_DIR") + "/shojiwm-" + Quickshell.env("WAYLAND_DISPLAY") + ".sock"
-        connected: true
-        function refresh() {
-            write(JSON.stringify({ id: 1, method: "dock.get", params: {
-                monitor: screenShell.output.name, width: dockWindow.width, height: dockWindow.height
-            } }) + "\n");
-            write(JSON.stringify({ method: "mateengine.shell", params: {
-                monitor: screenShell.output.name,
-                visible: dockPill.visible && dockPill.y < dockWindow.height,
-                dock: {
-                    x: (screenShell.output.width - dockWindow.width) / 2,
-                    y: screenShell.output.height - dockWindow.height,
-                    width: dockPill.width,
-                    height: dockPill.height
+    Loader {
+        id: dockConnection
+        sourceComponent: Component {
+            Socket {
+                path: Quickshell.env("XDG_RUNTIME_DIR") + "/shojiwm-" + Quickshell.env("WAYLAND_DISPLAY") + ".sock"
+                connected: true
+                function refresh() {
+                    write(JSON.stringify({ id: 1, method: "dock.get", params: {
+                        monitor: screenShell.output.name, width: dockWindow.width, height: dockWindow.height
+                    } }) + "\n");
+                    write(JSON.stringify({ method: "mateengine.shell", params: {
+                        monitor: screenShell.output.name,
+                        visible: dockPill.visible && dockPill.y < dockWindow.height,
+                        dock: {
+                            x: (screenShell.output.width - dockWindow.width) / 2,
+                            y: screenShell.output.height - dockWindow.height,
+                            width: dockPill.width,
+                            height: dockPill.height
+                        }
+                    } }) + "\n");
+                    flush();
                 }
-            } }) + "\n");
-            flush();
-        }
-        onConnectionStateChanged: {
-            if (connected) refresh();
-            else { dockWindow.occluded = false; dockWindow.nearby = false; dockWindow.petSeated = false; screenShell.chromeFullscreen = false; }
-        }
-        parser: SplitParser {
-            onRead: data => {
-                try {
-                    const message = JSON.parse(data);
-                    if (message.id === 1 && message.result) {
-                        dockWindow.occluded = message.result.occluded === true;
-                        dockWindow.nearby = message.result.nearby === true;
-                        dockWindow.petSeated = message.result.petSeated === true;
-                        screenShell.chromeFullscreen = message.result.chromeFullscreen === true;
-                    } else if (message.event === "dock.proximity" && message.payload.monitor === screenShell.output.name) {
-                        dockWindow.nearby = message.payload.inside === true;
+                onConnectionStateChanged: {
+                    if (connected) refresh();
+                    else { dockWindow.occluded = false; dockWindow.nearby = false; dockWindow.petSeated = false; screenShell.chromeFullscreen = false; }
+                }
+                parser: SplitParser {
+                    onRead: data => {
+                        try {
+                            const message = JSON.parse(data);
+                            if (message.id === 1 && message.result) {
+                                dockWindow.occluded = message.result.occluded === true;
+                                dockWindow.nearby = message.result.nearby === true;
+                                dockWindow.petSeated = message.result.petSeated === true;
+                                screenShell.chromeFullscreen = message.result.chromeFullscreen === true;
+                            } else if (message.event === "dock.proximity" && message.payload.monitor === screenShell.output.name) {
+                                dockWindow.nearby = message.payload.inside === true;
+                            }
+                        } catch (error) { console.warn("Dock state:", error); }
                     }
-                } catch (error) { console.warn("Dock state:", error); }
+                }
             }
         }
     }
     // ponytail: sample overlap at 10 Hz; use geometry events if polling becomes costly.
-    Timer { interval: 100; repeat: true; running: dockSocket.connected; onTriggered: dockSocket.refresh() }
-    Timer { interval: 1000; repeat: true; running: !dockSocket.connected; onTriggered: dockSocket.connected = true }
+    Timer { interval: 100; repeat: true; running: dockConnection.item && dockConnection.item.connected; onTriggered: dockConnection.item.refresh() }
+    Timer {
+        interval: 1000; repeat: true
+        running: !dockConnection.item || !dockConnection.item.connected
+        // Quickshell 0.3.1 keeps a failed socket; recreate it before retrying.
+        onTriggered: { dockConnection.active = false; dockConnection.active = true; }
+    }
 
     PanelWindow {
         screen: screenShell.output
@@ -85,7 +94,7 @@ Scope {
                 spacing: 12
                 Rectangle {
                     Layout.preferredWidth: 40; Layout.preferredHeight: 40; radius: 20; color: Theme.raised
-                    PanelIcon { anchors.centerIn: parent; name: Osd.kind === "layout" ? "keyboard" : Services.muted ? "muted" : "volume"; tint: Theme.accent }
+                    PanelIcon { anchors.centerIn: parent; name: Osd.kind === "layout" ? "keyboard" : Services.muted ? "muted" : "volume"; level: Services.volume / 100; tint: Theme.accent }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: 8
@@ -176,7 +185,22 @@ Scope {
                 highlighted: screenShell.panelOpen && screenShell.shell.panelPage === "notifications"
                 contentItem: RowLayout {
                     spacing: 7
-                    PanelIcon { name: Notifications.quiet ? "bell-off" : "bell"; implicitWidth: 17; implicitHeight: 17; Layout.alignment: Qt.AlignVCenter; tint: notificationButton.highlighted ? Theme.surface : Theme.ink }
+                    PanelIcon {
+                        id: notificationIcon
+                        name: Notifications.quiet ? "bell-off" : "bell"
+                        implicitWidth: 17; implicitHeight: 17
+                        Layout.alignment: Qt.AlignVCenter
+                        tint: notificationButton.highlighted ? Theme.surface : Theme.ink
+                        property int previousCount: 0
+                        Component.onCompleted: previousCount = Notifications.count
+                        Connections {
+                            target: Notifications
+                            function onCountChanged(): void {
+                                if (Notifications.count > notificationIcon.previousCount) notificationIcon.pulse();
+                                notificationIcon.previousCount = Notifications.count;
+                            }
+                        }
+                    }
                     Rectangle {
                         visible: Notifications.count > 0
                         implicitWidth: Math.max(18, notificationCount.implicitWidth + 8); implicitHeight: 18; radius: 9
@@ -201,7 +225,7 @@ Scope {
                     RowLayout {
                         spacing: 5
                         Layout.alignment: Qt.AlignVCenter
-                        PanelIcon { name: Services.muted ? "muted" : "volume"; implicitWidth: 16; implicitHeight: 16; Layout.alignment: Qt.AlignVCenter; tint: systemButton.highlighted ? Theme.surface : Theme.ink }
+                        PanelIcon { name: Services.muted ? "muted" : "volume"; level: Services.volume / 100; implicitWidth: 16; implicitHeight: 16; Layout.alignment: Qt.AlignVCenter; tint: systemButton.highlighted ? Theme.surface : Theme.ink }
                         UiText { text: Services.muted ? "Выкл" : Services.volume + "%"; font.pixelSize: 11; Layout.alignment: Qt.AlignVCenter; color: systemButton.highlighted ? Theme.surface : Theme.ink }
                     }
                     Rectangle { visible: Keyboard.available; implicitWidth: 1; implicitHeight: 14; Layout.alignment: Qt.AlignVCenter; color: systemButton.highlighted ? Theme.surface : Theme.line }
@@ -403,6 +427,12 @@ Scope {
                             UiText {
                                 text: popup.displayedPage === "controls" ? "Системная панель" : "Уведомления"
                                 font.pixelSize: 15; font.weight: Font.Medium; Layout.fillWidth: true
+                            }
+                            ActionButton {
+                                visible: popup.displayedPage === "controls"
+                                icon.source: Qt.resolvedUrl("icons/home-settings.svg")
+                                hint: "Системные настройки"; implicitWidth: 32; padding: 7
+                                onClicked: { screenShell.shell.panelPage = ""; SystemSettings.open("displays", screenShell.output.name); }
                             }
                             ActionButton { icon.source: Qt.resolvedUrl("icons/close.svg"); hint: "Закрыть"; implicitWidth: 32; padding: 7; onClicked: screenShell.shell.panelPage = "" }
                         }

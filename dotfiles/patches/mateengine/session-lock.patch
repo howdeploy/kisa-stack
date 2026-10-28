@@ -1,0 +1,78 @@
+diff --git a/Linux/bridge-src/ShojiIpc.cs b/Linux/bridge-src/ShojiIpc.cs
+index 2f06295..821fe57 100644
+--- a/Linux/bridge-src/ShojiIpc.cs
++++ b/Linux/bridge-src/ShojiIpc.cs
+@@ -35,6 +35,7 @@ namespace MateEngine.Shoji
+         public bool SeatingSupported;
+         public bool MotionSupported;
+         public bool WindowVisible = true;
++        public bool SessionLocked;
+         public bool Covered;
+         public bool HasIdleState, DesktopIdle, IdleEnabled;
+         public int IdleTimeout;
+@@ -482,6 +483,7 @@ namespace MateEngine.Shoji
+         static ShojiSnapshot ParseState(Dictionary<string, object> result, ShojiSnapshot previous)
+         {
+             var snapshot = new ShojiSnapshot();
++            snapshot.SessionLocked = Get(result, "sessionLocked") is bool && (bool)Get(result, "sessionLocked");
+             object seating = Get(result, "seatingVersion");
+             snapshot.SeatingSupported = seating is double && (double)seating >= 2;
+             snapshot.MotionSupported = seating is double && (double)seating >= 3;
+diff --git a/Linux/overlay/Assets/Scripts/Assembly-CSharp/AvatarBigScreenScreenSaver.cs b/Linux/overlay/Assets/Scripts/Assembly-CSharp/AvatarBigScreenScreenSaver.cs
+index a6e8c8e..9f7b59b 100644
+--- a/Linux/overlay/Assets/Scripts/Assembly-CSharp/AvatarBigScreenScreenSaver.cs
++++ b/Linux/overlay/Assets/Scripts/Assembly-CSharp/AvatarBigScreenScreenSaver.cs
+@@ -237,8 +237,8 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
+ 		bool big = avatarAnimator != null && avatarAnimator.GetBool("isBigScreen");
+ 		bool active = big && avatarAnimator.GetBool("isBigScreenSaver");
+ 		bool enabled = avatarAnimator != null && bigScreenHandler != null && enableBigScreenScreenSaver &&
+-			!MenuActions.IsAnyMenuOpen() && WindowManager.AllowDesktopActivity &&
+-			(active || (!big && IsInAllowedState()));
++			(WindowManager.IsSessionLocked || (!MenuActions.IsAnyMenuOpen() && WindowManager.AllowDesktopActivity &&
++			(active || (!big && IsInAllowedState()))));
+ 		var wm = WindowManager.Instance;
+ 		int state = wm != null ? wm.GetDesktopIdleState(timeout, enabled) : -1;
+ 		idleTimer = 0f;
+diff --git a/Linux/overlay/Assets/ShojiLinux/WindowManager.cs b/Linux/overlay/Assets/ShojiLinux/WindowManager.cs
+index ab302c8..692f216 100755
+--- a/Linux/overlay/Assets/ShojiLinux/WindowManager.cs
++++ b/Linux/overlay/Assets/ShojiLinux/WindowManager.cs
+@@ -74,6 +74,7 @@ public class WindowManager : MonoBehaviour, IPointerDownHandler, IPointerUpHandl
+     TDBus.Connection _dBusConnection;
+     TDBus.ConnectionInfo _dBusConnectionInfo;
+     static Func<bool> _shojiReady, _shojiVisible;
++    static Func<bool> _shojiLocked;
+     static Func<int, bool, int> _shojiScreensaver;
+ 
+     public static bool IsShojiSession => (Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") ?? "")
+@@ -94,6 +95,13 @@ public class WindowManager : MonoBehaviour, IPointerDownHandler, IPointerUpHandl
+         _shojiVisible = (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), type.GetMethod("AllowPointerTracking"));
+         var idle = type.GetMethod("GetScreensaverState");
+         if (idle != null) _shojiScreensaver = (Func<int, bool, int>)Delegate.CreateDelegate(typeof(Func<int, bool, int>), idle);
++        var locked = type.GetMethod("IsSessionLocked");
++        if (locked != null) _shojiLocked = (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), locked);
++    }
++
++    public static bool IsSessionLocked
++    {
++        get { ResolveShojiCapabilities(); return _shojiLocked != null && _shojiLocked(); }
+     }
+ 
+     public static bool AllowDesktopActivity
+diff --git a/Linux/bridge-src/ShojiBridge.cs b/Linux/bridge-src/ShojiBridge.cs
+index fc060a6..1c25069 100644
+--- a/Linux/bridge-src/ShojiBridge.cs
++++ b/Linux/bridge-src/ShojiBridge.cs
+@@ -93,6 +93,12 @@ namespace MateEngine.Shoji
+                 snapshot.HasSurfaces && snapshot.MotionSupported;
+         }
+ 
++        public static bool IsSessionLocked()
++        {
++            var snapshot = Snapshot();
++            return _ipc != null && _ipc.IsFresh(snapshot) && snapshot.SessionLocked;
++        }
++
+         // -1: unavailable/stale, 0: active or inhibited, 1: compositor idle.
+         public static int GetScreensaverState(int timeout, bool enabled)
+         {

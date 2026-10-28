@@ -11,6 +11,8 @@ Singleton {
     readonly property string fallback: neutral
     readonly property string neutral: Qt.resolvedUrl("assets/default-wallpaper.svg").toString()
     property string targetOutput: ""
+    property int previewClients: 0
+    readonly property bool previewsRequested: targetOutput !== "" || previewClients > 0
     property int pickerRow: 0
     property var outputs: ({})
     property string layoutId: "empty"
@@ -64,7 +66,15 @@ Singleton {
         pendingOutput = "";
         targetOutput = "";
     }
-    onTargetOutputChanged: { if (!targetOutput) thumbnailQueue = []; }
+    onPreviewsRequestedChanged: {
+        if (!previewsRequested) thumbnailQueue = [];
+        else nextThumbnail();
+    }
+    function requestThumbnails(urls) {
+        thumbnailQueue = [...new Set(urls.filter(url => typeof url === "string" && url
+            && !checkedThumbnails[url] && url !== thumbnailUrl))];
+        nextThumbnail();
+    }
     function requestPreviews(index, radius, urls) {
         const next = [];
         for (let distance = 0; distance <= radius; distance++) {
@@ -87,7 +97,7 @@ Singleton {
         nextThumbnail();
     }
     function nextThumbnail() {
-        if (thumbnailWorker.running || !targetOutput || !thumbnailQueue.length) return;
+        if (thumbnailWorker.running || !previewsRequested || !thumbnailQueue.length) return;
         thumbnailUrl = thumbnailQueue[0];
         thumbnailQueue = thumbnailQueue.slice(1);
         thumbnailWorker.command = ["python3", decodeURIComponent(Qt.resolvedUrl("wallpaper-thumbnail.py").toString().replace("file://", "")), thumbnailUrl];

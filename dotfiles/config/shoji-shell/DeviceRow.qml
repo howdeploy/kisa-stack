@@ -1,28 +1,27 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
-Button {
+ActionButton {
     id: row
     property string subtitle: ""
     property string glyph: ""
     property bool selected: false
     property string trailingIcon: selected ? "check" : ""
     property real trailingRotation: 0
-    property string hint: text + (subtitle ? ": " + subtitle : "")
+    hint: text + (subtitle ? ": " + subtitle : "")
     implicitHeight: subtitle ? 52 : 38
     padding: 10
     hoverEnabled: true
     opacity: enabled ? 1 : 0.45
     Accessible.name: hint
     background: Rectangle {
-        radius: 6
+        radius: Theme.surfaceRadius
         color: row.down ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.10)
             : row.hovered ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.06)
             : row.selected ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.06) : "transparent"
         border.width: row.visualFocus ? 1 : 0
         border.color: Theme.accent
-        Behavior on color { ColorAnimation { duration: 100 } }
+        Behavior on color { ColorAnimation { duration: Theme.duration(220) } }
     }
     contentItem: RowLayout {
         spacing: 10
@@ -44,7 +43,7 @@ Button {
             tint: row.selected ? Theme.accent : Theme.muted
             Layout.preferredWidth: 16; Layout.preferredHeight: 16
             rotation: row.trailingRotation
-            Behavior on rotation { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            Behavior on rotation { NumberAnimation { duration: Theme.duration(220); easing.type: Easing.OutCubic } }
         }
     }
 }

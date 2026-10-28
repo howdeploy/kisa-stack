@@ -30,7 +30,7 @@ Singleton {
     // read back out of the file: the adapter is repopulated asynchronously
     // after a write, so two pins in quick succession had the second one read a
     // list the first had already replaced, and one of them was lost.
-    property var pinned: ["brave-browser", "com.mitchellh.ghostty", "org.kde.dolphin", "codex-desktop", "Happ", "steam"]
+    property var pinned: ["com.mitchellh.ghostty", "org.kde.dolphin"]
 
     // The row, left to right:
     //   { key, name, icon, entry, pinned, windows: [Toplevel] }
@@ -98,7 +98,9 @@ Singleton {
             var key = String(pins[i]);
             if (key === "" || index[key])
                 continue;
-            add(key, lookup(key), key, true);
+            var entry = lookup(key);
+            if (entry)
+                add(key, entry, key, true);
         }
         var pinnedCount = list.length;
 

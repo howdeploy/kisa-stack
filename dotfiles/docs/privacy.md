@@ -31,7 +31,9 @@ local CLI server; provider API URLs are public service endpoints without secrets
 ## What becomes private after installation
 
 `integrations.env`, selected wallpaper paths, dock pins, widget caches, session
-titles, account balances and provider output belong to the installing user. The
+titles, account balances and provider output belong to the installing user.
+`system-settings.json` contains local device/display preferences and lock-wallpaper
+paths; it is ignored, excluded from source copies and preserved during upgrades. The
 installer keeps live configuration outside the repository. It backs up replaced
 directories privately and never uploads their contents. Do not publish those backups.
 

@@ -1,0 +1,36 @@
+# Installed reference snapshot: 2026-10-28, Europe/Moscow.
+# Informational inventory; not an automatic installation list.
+appimagelauncher 2.2.0-10
+bridge-utils 1.7.1-5
+cheese 44.1-7
+elephant-bin 2.22.1-1
+elephant-desktopapplications-bin 2.22.1-1
+elephant-files-bin 2.22.1-1
+elephant-menus-bin 2.22.1-1
+elephant-providerlist-bin 2.22.1-1
+google-chrome 150.0.7871.46-1
+happ 4.2.1-317
+incy 2.1.5-1
+lib32-libcanberra 1:0.30+r2+gc0620e4-4
+lib32-openal 1.25.2-1
+linux-firmware-meta 20260110-1
+linux-wallpaperengine-git r627.b016d7d1-1
+minecraft-launcher 1:2.1.3-3
+nekoray 4.0.1-2
+neofetch 7.1.0-2
+portproton 1.7.5-1
+python310 3.10.19-1
+python311 3.11.14-1
+qt5-webchannel 5.15.19-1
+qt5-websockets 5.15.19+kde+r2-1
+reiserfsprogs 3.6.27-7
+shojiwm-local 0.1.0.r20260929.dcea1dd.overlays-13
+sing-geoip-common-git 20241012.r0.gecd02c1-1
+sing-geoip-db 20250212-1
+sing-geosite-common-git 20240914091803.r0.gdd64ae0-1
+sing-geosite-db 20250223232811-1
+sunshine-bin 2026.516.143833-1
+v2raya-bin 2.2.7.5-1
+walker-bin 2.17.1-1
+xray-bin 26.3.27-1
+yandex-music 5.106.2-1
