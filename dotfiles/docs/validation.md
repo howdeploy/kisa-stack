@@ -1,5 +1,21 @@
 # Validation record
 
+## 2026-10-28 delayed-frame media reply follow-up
+
+The media patch is refreshed to PR #711 revision `2de3518`. Available D-Bus
+replies are read and dispatched before the application deadline is applied;
+a completed reply is retained even when a frame delay outlasts 250 ms.
+Each new request also gets an immediate zero-timeout I/O attempt.
+
+Two regression sections use a private-bus peer returning a real Position reply:
+one covers an already completed reply and the other a reply still unread in the
+socket when the application deadline has expired. They force only the application
+deadline, without sleeping to simulate the frame delay. The existing incomplete
+request expiry check remains. These tests and a new build were not run.
+The regenerated media/crop patches passed `git apply --check` against the
+pinned engine source in a temporary directory.
+No installed runtime or live session was changed.
+
 ## 2026-10-28 publication completeness follow-up
 
 The source publication now pins ShojiWM `d78b72a` directly, includes installed

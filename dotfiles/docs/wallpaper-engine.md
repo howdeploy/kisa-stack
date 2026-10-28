@@ -8,9 +8,12 @@ source build below supplies the renderer; it does not download Steam content.
 
 `sources.json` records the engine base, mpv and NVIDIA codec-header revisions.
 The engine media patch is exported from
-[PR #711 revision afeb74d](https://github.com/Almamu/linux-wallpaperengine/commit/afeb74d8005549681c8543d2c25bde1916907135).
+[PR #711 revision 2de3518](https://github.com/Almamu/linux-wallpaperengine/commit/2de351884f7f4648e528d1570b5d6103c7870a79).
 It includes asynchronous D-Bus requests, a 250 ms application deadline, bounded
 dispatch, metadata retries and failed-player cooldown, plus regression cases.
+After a delayed frame, available replies are read/dispatched before applying
+the deadline and completed replies take priority over expiry. A new request
+also gets an immediate zero-timeout I/O attempt.
 
 | Patch | Purpose |
 | --- | --- |
