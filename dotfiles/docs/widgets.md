@@ -50,13 +50,14 @@ not override the captured stream. The playerctld mirror is excluded from selecti
 The spectrum uses a local PipeWire/PulseAudio recording stream, with NumPy for FFT
 processing. It does not upload audio. Neko reacts to the music energy.
 
-For YouTube, the title, author and thumbnail are tied to one video ID from the
-player's watch/shorts/live/embed URL. A public YouTube oEmbed request resolves the
-title and author; the thumbnail URL uses the same ID. Responses for an earlier
-video cannot overwrite the next track, and requests stop after ten seconds.
-Lookups occur on video changes rather than periodic polling. Other players keep
-their standard MPRIS metadata and artwork. The author's private music catalog,
-artwork paths and site-specific adapter are not included.
+For YouTube, the current native browser media title supplies the name immediately.
+Plasma can retain an old watch URL across playlist transitions and publish muted
+preview metadata. Its artist/artwork updates are accepted only when their title
+matches native playback. The last matching tuple survives preview updates, while
+old artwork is blocked on the next track until a new artwork URL arrives. The
+widget does not query YouTube metadata endpoints or depend on the watch URL.
+Other players keep their standard MPRIS metadata and artwork. The author's private
+music catalog, artwork paths and site-specific adapter are not included.
 
 Local caches and session metadata can contain private repository names, discussion
 titles, rental labels and prompts. They are not publication material. Do not copy

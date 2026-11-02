@@ -1,5 +1,20 @@
 # Validation record
 
+## 2026-11-02 native YouTube title follow-up
+
+A later playlist transition exposed a stale watch URL shared by integration and
+tab APIs despite a changed native media title. The previous successful metadata
+lookups did not validate that URL as a permanent track identity. Browser read-only
+inspection confirmed the audible main video and a separate muted inline preview.
+
+The widget now uses the native media title directly and retains only matching
+integration artist/artwork metadata. The oEmbed request path is removed. Regression
+checks cover a constant stale URL, muted previews, immediate native title changes,
+late artwork and source ownership. Actual Qt bindings were checked with those
+transitions and the local catalog. Runtime widget title/author were compared with
+the playing page; temporary logging was removed. No desktop build or installation
+test was run for this source update.
+
 ## 2026-11-02 music and GitHub widget fixes
 
 The installed music widget was checked through its runtime state while YouTube

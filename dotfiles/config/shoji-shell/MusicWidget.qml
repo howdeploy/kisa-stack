@@ -26,16 +26,21 @@ Item {
         return sourceName((candidate.metadata || {})["xesam:url"])
             || (/\s[-—]\sYouTube$/.test(candidate.trackTitle || "") ? "YouTube" : "");
     }
+    function playerPid(candidate) {
+        const match = String(candidate.dbusName || "").match(/\.instance(\d+)$/);
+        return Number((candidate.metadata || {})["kde:pid"] || (match ? match[1] : 0));
+    }
+    readonly property var nativePlayer: capturePid > 1
+        ? Mpris.players.values.find(p => p.isPlaying && !(p.metadata || {})["kde:pid"]
+            && playerPid(p) === capturePid && playerSource(p)) || null : null
     readonly property var player: {
         if (!spectrumAvailable || capturePid <= 1 || ambiguousAudio) return null;
         const candidates = Mpris.players.values.filter(p => {
             if (p.dbusName === "org.mpris.MediaPlayer2.playerctld") return false;
-            const nativePid = String(p.dbusName || "").match(/\.instance(\d+)$/);
-            const pid = Number((p.metadata || {})["kde:pid"] || (nativePid ? nativePid[1] : 0));
-            return pid === capturePid && playerSource(p);
+            return playerPid(p) === capturePid && playerSource(p);
         });
         // The captured stream is playing even when the integration reports Paused.
-        const native = candidates.find(p => p.isPlaying && !(p.metadata || {})["kde:pid"]);
+        const native = root.nativePlayer;
         const matching = native
             ? candidates.filter(p => playerSource(p) === playerSource(native)) : candidates;
         const integrated = matching.filter(p => (p.metadata || {})["kde:pid"]);
@@ -52,61 +57,42 @@ Item {
     property var mateTrack: ({})
     readonly property string mateIcon: Qt.resolvedUrl("icons/mateengine.svg").toString()
     property bool ambiguousAudio: false
-    readonly property string youtubeVideoId: {
-        if (!player || source !== "YouTube") return "";
-        const url = String((player.metadata || {})["xesam:url"] || "");
-        const match = url.match(/[?&]v=([\w-]{11})(?:[&#]|$)/)
-            || url.match(/\/(?:shorts|live|embed)\/([\w-]{11})(?:[/?#]|$)/);
-        return match ? match[1] : "";
+    function youtubeTitle(value) {
+        const title = String(value || "").trim();
+        return /\s[-—]\sYouTube$/.test(title)
+            ? title.replace(/^\(\d+\)\s*/, "").replace(/\s[-—]\sYouTube$/, "").trim() : title;
     }
+    readonly property string currentYoutubeTitle: source === "YouTube"
+        ? youtubeTitle(nativePlayer ? nativePlayer.trackTitle : player ? player.trackTitle : "") : ""
     property var youtubeTrack: ({})
-    property var youtubeRequest: null
-    function loadYoutubeTrack() {
-        if (youtubeRequest) youtubeRequest.abort();
-        youtubeRequest = null;
-        youtubeDeadline.stop();
-        youtubeTrack = ({});
-        const videoId = youtubeVideoId;
-        if (!videoId) return;
-        const request = new XMLHttpRequest();
-        youtubeRequest = request;
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE
-                || root.youtubeRequest !== request || root.youtubeVideoId !== videoId) return;
-            root.youtubeRequest = null;
-            youtubeDeadline.stop();
-            if (request.status !== 200) return;
-            try {
-                const value = JSON.parse(request.responseText);
-                if (typeof value.title !== "string" || !value.title
-                    || typeof value.author_name !== "string" || !value.author_name) return;
-                root.youtubeTrack = { id: videoId, title: value.title, artist: value.author_name };
-            } catch (error) { root.youtubeTrack = ({}); }
-        };
-        request.open("GET", "https://www.youtube.com/oembed?format=json&url="
-            + encodeURIComponent("https://www.youtube.com/watch?v=" + videoId));
-        request.send();
-        youtubeDeadline.restart();
+    readonly property var youtubeCandidate: {
+        if (!currentYoutubeTitle || !player) return null;
+        const metadata = player.metadata || {};
+        if (youtubeTitle(metadata["xesam:title"]) !== currentYoutubeTitle) return null;
+        return { title: currentYoutubeTitle, artist: String(player.trackArtist || ""),
+            artwork: String(metadata["mpris:artUrl"] || "") };
     }
-    onYoutubeVideoIdChanged: loadYoutubeTrack()
-    Component.onDestruction: { if (youtubeRequest) youtubeRequest.abort(); }
-    Timer {
-        id: youtubeDeadline
-        interval: 10000
-        onTriggered: {
-            if (root.youtubeRequest) root.youtubeRequest.abort();
-            root.youtubeRequest = null;
-        }
+    onYoutubeCandidateChanged: {
+        if (!youtubeCandidate) return;
+        const previous = youtubeTrack;
+        const sameTrack = previous.title === currentYoutubeTitle;
+        const blockedArtwork = sameTrack ? previous.blockedArtwork : previous.artwork || "";
+        const artwork = youtubeCandidate.artwork && youtubeCandidate.artwork !== blockedArtwork
+            ? youtubeCandidate.artwork : sameTrack ? previous.artwork : "";
+        youtubeTrack = { title: currentYoutubeTitle,
+            artist: youtubeCandidate.artist || (sameTrack ? previous.artist : ""),
+            artwork: artwork, blockedArtwork: blockedArtwork };
     }
-    readonly property string title: youtubeVideoId ? (youtubeTrack.id === youtubeVideoId ? youtubeTrack.title
-        : youtubeRequest ? "Загрузка трека…" : "Название недоступно")
+    readonly property string title: currentYoutubeTitle ? currentYoutubeTitle
         : player ? player.trackTitle || source
         : ambiguousAudio ? "Несколько аудиопотоков" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.title || "MateEngine") : "Звук браузера") : "Ничего не играет"
-    readonly property string artist: youtubeVideoId ? (youtubeTrack.id === youtubeVideoId ? youtubeTrack.artist : "YouTube")
+    readonly property string artist: currentYoutubeTitle
+        ? (youtubeTrack.title === currentYoutubeTitle && youtubeTrack.artist || "YouTube")
         : player ? player.trackArtist || source
         : ambiguousAudio ? "Источник неоднозначен" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.artist || "MateEngine") : "Без данных о треке") : "Включи музыку"
-    // Plasma can publish artwork from another YouTube video under the same player.
-    readonly property string artwork: youtubeVideoId ? "https://i.ytimg.com/vi/" + youtubeVideoId + "/hqdefault.jpg"
+    // Preview metadata is accepted only after it agrees with native playback.
+    readonly property string artwork: currentYoutubeTitle
+        ? (youtubeTrack.title === currentYoutubeTitle ? youtubeTrack.artwork || "" : "")
         : player ? player.trackArtUrl : mateEngine && playing ? (mateTrack.playing && mateTrack.artwork || mateIcon) : ""
     property var levels: []
     property bool spectrumAvailable: false
