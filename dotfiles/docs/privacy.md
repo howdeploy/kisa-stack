@@ -28,6 +28,12 @@ colors and geometry. Those are the desktop configuration being shared, not accou
 or device credentials. Loopback URLs in the limits adapter address a temporary
 local CLI server; provider API URLs are public service endpoints without secrets.
 
+While a YouTube source is playing, the music widget sends its video ID directly
+to YouTube's public oEmbed endpoint and loads the corresponding thumbnail from
+`i.ytimg.com`. It does not read browser profiles, cookies, accounts or feed data,
+and does not upload recorded audio. These requests use public video URLs and
+do not pass through a service operated by the dotfiles author.
+
 ## What becomes private after installation
 
 `integrations.env`, selected wallpaper paths, dock pins, widget caches, session

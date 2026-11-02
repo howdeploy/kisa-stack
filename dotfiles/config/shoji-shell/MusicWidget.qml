@@ -22,14 +22,27 @@ Item {
         if (["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(host)) return "YouTube";
         return host;
     }
+    function playerSource(candidate) {
+        return sourceName((candidate.metadata || {})["xesam:url"])
+            || (/\s[-—]\sYouTube$/.test(candidate.trackTitle || "") ? "YouTube" : "");
+    }
     readonly property var player: {
         if (!spectrumAvailable || capturePid <= 1 || ambiguousAudio) return null;
-        const candidates = Mpris.players.values.filter(p => p.isPlaying
-            && Number((p.metadata || {})["kde:pid"] || 0) === capturePid
-            && sourceName((p.metadata || {})["xesam:url"]));
-        return candidates.length === 1 ? candidates[0] : null;
+        const candidates = Mpris.players.values.filter(p => {
+            if (p.dbusName === "org.mpris.MediaPlayer2.playerctld") return false;
+            const nativePid = String(p.dbusName || "").match(/\.instance(\d+)$/);
+            const pid = Number((p.metadata || {})["kde:pid"] || (nativePid ? nativePid[1] : 0));
+            return pid === capturePid && playerSource(p);
+        });
+        // The captured stream is playing even when the integration reports Paused.
+        const native = candidates.find(p => p.isPlaying && !(p.metadata || {})["kde:pid"]);
+        const matching = native
+            ? candidates.filter(p => playerSource(p) === playerSource(native)) : candidates;
+        const integrated = matching.filter(p => (p.metadata || {})["kde:pid"]);
+        if (integrated.length === 1) return integrated[0];
+        return matching.length === 1 ? matching[0] : null;
     }
-    readonly property string source: player ? sourceName(player.metadata["xesam:url"])
+    readonly property string source: player ? playerSource(player)
         : playing && mateEngine ? "MateEngine" : ""
     readonly property bool playing: captureWanted && spectrumAvailable && capturePid > 1 && !ambiguousAudio
         && (!mateEngine || mateTrack.playing === true)
@@ -39,11 +52,62 @@ Item {
     property var mateTrack: ({})
     readonly property string mateIcon: Qt.resolvedUrl("icons/mateengine.svg").toString()
     property bool ambiguousAudio: false
-    readonly property string title: player ? player.trackTitle || source
+    readonly property string youtubeVideoId: {
+        if (!player || source !== "YouTube") return "";
+        const url = String((player.metadata || {})["xesam:url"] || "");
+        const match = url.match(/[?&]v=([\w-]{11})(?:[&#]|$)/)
+            || url.match(/\/(?:shorts|live|embed)\/([\w-]{11})(?:[/?#]|$)/);
+        return match ? match[1] : "";
+    }
+    property var youtubeTrack: ({})
+    property var youtubeRequest: null
+    function loadYoutubeTrack() {
+        if (youtubeRequest) youtubeRequest.abort();
+        youtubeRequest = null;
+        youtubeDeadline.stop();
+        youtubeTrack = ({});
+        const videoId = youtubeVideoId;
+        if (!videoId) return;
+        const request = new XMLHttpRequest();
+        youtubeRequest = request;
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE
+                || root.youtubeRequest !== request || root.youtubeVideoId !== videoId) return;
+            root.youtubeRequest = null;
+            youtubeDeadline.stop();
+            if (request.status !== 200) return;
+            try {
+                const value = JSON.parse(request.responseText);
+                if (typeof value.title !== "string" || !value.title
+                    || typeof value.author_name !== "string" || !value.author_name) return;
+                root.youtubeTrack = { id: videoId, title: value.title, artist: value.author_name };
+            } catch (error) { root.youtubeTrack = ({}); }
+        };
+        request.open("GET", "https://www.youtube.com/oembed?format=json&url="
+            + encodeURIComponent("https://www.youtube.com/watch?v=" + videoId));
+        request.send();
+        youtubeDeadline.restart();
+    }
+    onYoutubeVideoIdChanged: loadYoutubeTrack()
+    Component.onDestruction: { if (youtubeRequest) youtubeRequest.abort(); }
+    Timer {
+        id: youtubeDeadline
+        interval: 10000
+        onTriggered: {
+            if (root.youtubeRequest) root.youtubeRequest.abort();
+            root.youtubeRequest = null;
+        }
+    }
+    readonly property string title: youtubeVideoId ? (youtubeTrack.id === youtubeVideoId ? youtubeTrack.title
+        : youtubeRequest ? "Загрузка трека…" : "Название недоступно")
+        : player ? player.trackTitle || source
         : ambiguousAudio ? "Несколько аудиопотоков" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.title || "MateEngine") : "Звук браузера") : "Ничего не играет"
-    readonly property string artist: player ? player.trackArtist || source
+    readonly property string artist: youtubeVideoId ? (youtubeTrack.id === youtubeVideoId ? youtubeTrack.artist : "YouTube")
+        : player ? player.trackArtist || source
         : ambiguousAudio ? "Источник неоднозначен" : playing ? (mateEngine ? (mateTrack.playing && mateTrack.artist || "MateEngine") : "Без данных о треке") : "Включи музыку"
-    readonly property string artwork: player ? player.trackArtUrl : mateEngine && playing ? (mateTrack.playing && mateTrack.artwork || mateIcon) : ""
+    // Plasma can publish artwork from another YouTube video under the same player.
+    readonly property string artwork: youtubeVideoId ? "https://i.ytimg.com/vi/" + youtubeVideoId + "/hqdefault.jpg"
+        : player ? player.trackArtUrl : mateEngine && playing ? (mateTrack.playing && mateTrack.artwork || mateIcon) : ""
     property var levels: []
     property bool spectrumAvailable: false
     // MPRIS may remain paused on another tab while Web Audio is already playing.

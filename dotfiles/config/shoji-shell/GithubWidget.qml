@@ -165,7 +165,8 @@ Item {
                         Layout.alignment: Qt.AlignTop
                         Layout.topMargin: 2
                         Layout.preferredWidth: 14; Layout.preferredHeight: 14
-                        name: notificationRow.modelData.type === "PullRequest" ? "git-pull-request" : "message-circle"
+                        name: notificationRow.modelData.type === "PullRequest" ? "git-pull-request"
+                            : notificationRow.modelData.type === "CheckSuite" ? "bell" : "message-circle"
                         tint: notificationRow.modelData.unread ? Theme.accent : Theme.muted
                     }
                     ColumnLayout {
@@ -179,7 +180,7 @@ Item {
                         }
                         UiText {
                             Layout.fillWidth: true
-                            text: notificationRow.modelData.repository + " #" + notificationRow.modelData.number
+                            text: notificationRow.modelData.repository + (notificationRow.modelData.number ? " #" + notificationRow.modelData.number : "")
                             font.pixelSize: 10; color: Theme.muted
                         }
                         UiText {

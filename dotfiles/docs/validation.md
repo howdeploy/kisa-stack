@@ -1,5 +1,20 @@
 # Validation record
 
+## 2026-11-02 music and GitHub widget fixes
+
+The installed music widget was checked through its runtime state while YouTube
+tracks changed, and the user confirmed correct title, author and artwork updates.
+The source publication preserves portable paths, generic MPRIS handling and
+existing integration opt-in gates; it excludes local catalogs and runtime logs.
+
+`node dotfiles/scripts/check-music-metadata.cjs` covers a paused integration with
+audible native playback, playerctld duplication, unrelated preview metadata,
+track changes, late replies, invalid responses and capture ownership. The GitHub
+collector's existing `--self-check` also covers event rows without comments and
+early notification output. The staged publication privacy scan and whitespace
+check passed. No desktop installation, build or new graphical check was run for
+this source publication.
+
 ## 2026-10-28 MPRIS signal-owner validation follow-up
 
 The media patch is refreshed to PR #711 revision `7f94c77`. Only current owners

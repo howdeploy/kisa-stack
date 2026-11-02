@@ -26,7 +26,7 @@ does not install Codex/Grok/Kimi, Vast or Hermes. See the
 
 | Flag | Prerequisites and access after opt-in |
 | --- | --- |
-| `SHOJI_ENABLE_GITHUB=1` | `gh` logged into **your** account; reads notifications, PRs, issues and discussion replies. Does not mark notifications read. Writes a local cache. |
+| `SHOJI_ENABLE_GITHUB=1` | `gh` logged into **your** account; reads notifications, PRs, issues and discussion replies. Shows unread events, including merges and CI failures, using notification update times. Counts open PRs across your owned repositories and unread comments separately. Does not mark notifications read. Writes a local cache. |
 | `SHOJI_ENABLE_VAST=1` | `vastai` configured for **your** account; reads balance, rentals, instance/volume counts and billing. Does not rent, stop or delete resources. Writes a local cache. |
 | `SHOJI_ENABLE_LIMITS=1` | Node.js and your installed/authenticated Codex, Grok and/or Kimi CLIs; queries quotas, spawning their local protocol adapters. Missing providers show unavailable. CLI token refresh may update the CLI's own credential store. |
 | `SHOJI_ENABLE_SESSIONS=1` | Your local Codex/Kimi/Grok session stores; reads titles and working-directory metadata. Clicking a session copies its resume command using `wl-copy`; it does not run it. Widget archiving writes its own local SQLite index. |
@@ -43,11 +43,20 @@ The limits and session adapters track particular CLI protocols/schema versions;
 those can change independently of the desktop. Check their source when updating
 a CLI. A missing quota is not a zero balance. No token is supplied in this repository.
 
-Music uses standard MPRIS metadata from your players. The spectrum uses a local
-PipeWire/PulseAudio recording stream when the player exposes a PID, with NumPy
-for FFT processing. It does not upload audio. Neko reacts to the music energy.
-The author's private music catalog, artwork paths and site-specific adapter are
-not included. Track artwork URLs are supplied by the local player.
+Music selects MPRIS sources belonging to the browser PID identified by the local
+audio stream. Native browser sessions can identify YouTube even without a page
+URL. Plasma Integration can report Paused during audible playback; that flag does
+not override the captured stream. The playerctld mirror is excluded from selection.
+The spectrum uses a local PipeWire/PulseAudio recording stream, with NumPy for FFT
+processing. It does not upload audio. Neko reacts to the music energy.
+
+For YouTube, the title, author and thumbnail are tied to one video ID from the
+player's watch/shorts/live/embed URL. A public YouTube oEmbed request resolves the
+title and author; the thumbnail URL uses the same ID. Responses for an earlier
+video cannot overwrite the next track, and requests stop after ten seconds.
+Lookups occur on video changes rather than periodic polling. Other players keep
+their standard MPRIS metadata and artwork. The author's private music catalog,
+artwork paths and site-specific adapter are not included.
 
 Local caches and session metadata can contain private repository names, discussion
 titles, rental labels and prompts. They are not publication material. Do not copy

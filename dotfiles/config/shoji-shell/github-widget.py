@@ -145,6 +145,20 @@ def resolve(notification, login):
     return {"count": len(unread), "commentAt": comment_at, "url": url, "number": number}
 
 
+def notification_row(notification):
+    subject = notification["subject"]
+    repo = notification["repository"]["full_name"]
+    match = re.fullmatch(r"https://api\.github\.com/repos/" + re.escape(repo)
+                         + r"/(pulls|issues|discussions)/(\d+)", subject.get("url") or "")
+    number = int(match[2]) if match else None
+    path = {"pulls": "pull", "issues": "issues", "discussions": "discussions"}[match[1]] if match else ""
+    if subject["type"] == "CheckSuite":
+        path = "actions"
+    url = f"https://github.com/{repo}" + (f"/{path}" if path else "") + (f"/{number}" if number else "")
+    return {"title": subject["title"], "repository": repo, "number": number, "url": url,
+            "unread": notification["unread"], "type": subject["type"], "updatedAt": notification["updated_at"]}
+
+
 def collect():
     cache_path = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "shoji-shell" / "github-widget.json"
     try:
@@ -177,12 +191,14 @@ def collect():
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         result["errors"].append("Уведомления: " + error_message(error))
         return result
-    recent, total, updated = [], 0, {}
     notifications.sort(key=lambda n: n["updated_at"], reverse=True)
+    recent = [notification_row(n) for n in notifications if n["unread"]][:5]
+    print(json.dumps({"login": login, "recent": recent, "errors": []}, ensure_ascii=False), flush=True)
+    total, updated = 0, {}
     for notification in notifications:
-        if notification["subject"]["type"] not in {"PullRequest", "Issue", "Discussion"}:
-            continue
         if not notification["unread"]:
+            continue
+        if notification["subject"]["type"] not in {"PullRequest", "Issue", "Discussion"}:
             continue
         key = notification["id"]
         fingerprint = [4, notification["updated_at"], notification.get("last_read_at"), notification["unread"],
@@ -207,12 +223,7 @@ def collect():
             updated[key] = old
             detail = old["detail"]
         total += detail["count"]
-        # Closing or merging a topic does not acknowledge its unread comments.
-        if detail["commentAt"]:
-            recent.append({"title": notification["subject"]["title"], "repository": notification["repository"]["full_name"],
-                           "number": detail["number"], "url": detail["url"], "unread": notification["unread"],
-                           "type": notification["subject"]["type"], "updatedAt": detail["commentAt"]})
-    result.update(commentCount=total, recent=sorted(recent, key=lambda row: row["updatedAt"], reverse=True)[:5])
+    result.update(commentCount=total, recent=recent)
     snapshot = cache.get("snapshot") or {}
     result["fetchedAt"] = snapshot.get("fetchedAt", 0) if result["errors"] else int(time.time() * 1000)
     snapshot = {**snapshot, **result}
@@ -228,6 +239,14 @@ def collect():
 
 
 def self_check():
+    event = {"unread": True, "updated_at": "2026-11-01T20:54:22Z",
+             "repository": {"full_name": "me/repo"},
+             "subject": {"type": "CheckSuite", "title": "CI failed", "url": None}}
+    row = notification_row(event)
+    assert row["url"] == "https://github.com/me/repo/actions" and row["number"] is None
+    assert row["updatedAt"] == event["updated_at"]
+    event["subject"] = {"type": "PullRequest", "title": "PR merged", "url": "https://api.github.com/repos/me/repo/pulls/3"}
+    assert notification_row(event)["url"] == "https://github.com/me/repo/pull/3"
     notification = {"unread": True, "last_read_at": "2026-09-26T12:00:00Z", "reason": "subscribed"}
     comments = [{"user": {"login": "me"}, "created_at": "2026-09-27T12:00:00Z"},
                 {"user": {"login": "other"}, "created_at": "2026-09-25T12:00:00Z"},
@@ -299,8 +318,10 @@ def self_check():
             complete = collect()
             assert complete["commentCount"] == 3 and not complete["errors"]
             assert len(complete["recent"]) == 2
-            early = json.loads(output.getvalue().splitlines()[-1])
+            early = json.loads(output.getvalue().splitlines()[-2])
             assert early["prCount"] == 2 and "commentCount" not in early and "fetchedAt" not in early
+            early_notifications = json.loads(output.getvalue().splitlines()[-1])
+            assert len(early_notifications["recent"]) == 2 and "commentCount" not in early_notifications
             old_thread = json.loads(cache_path.read_text())["threads"]["2"]
             for failure in ("timeout", "resolve"):
                 for notice in notices:
@@ -314,7 +335,7 @@ def self_check():
                 assert saved["snapshot"] == partial
             notices[1]["id"] = "uncached"
             partial = collect()
-            assert partial["commentCount"] == 3 and len(partial["recent"]) == 1
+            assert partial["commentCount"] == 3 and len(partial["recent"]) == 2
             assert partial["errors"]
             failure = None
             for notice in notices:
