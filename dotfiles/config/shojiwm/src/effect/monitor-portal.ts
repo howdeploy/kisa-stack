@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, createAnimationController, markLayerDirty,
   compileLayerEffect, layerSource, shaderStage, loadShader,
@@ -22,7 +23,7 @@ function dirty(): void {
 const animation = createAnimationController(dirty);
 
 function outputRect(name: string): number[] | null {
-  const output = COMPOSITOR.output.current[name];
+  const output = outputSnapshot()[name];
   if (!output?.resolution || output.scale <= 0) return null;
   return [output.position.x, output.position.y,
     output.resolution.width / output.scale, output.resolution.height / output.scale];
@@ -95,7 +96,7 @@ export function monitorPortalEffect(layer: WaylandLayer) {
   const clock = animation.variable(CLOCK);
   clock();
   const outputName = layer.outputName();
-  const output = COMPOSITOR.output.current[outputName];
+  const output = outputSnapshot()[outputName];
   if ((visible <= 0 && !animation.running(OPACITY)) || !outputs.includes(outputName) || !output) return null;
   return compileLayerEffect({
     input: layerSource(), alpha: "preserve",

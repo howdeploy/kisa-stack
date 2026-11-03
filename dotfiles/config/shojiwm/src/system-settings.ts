@@ -99,7 +99,7 @@ export function registerSystemSettings(ipc: IpcServer, fallbackOutput: () => str
     const fallback = fallbackOutput();
     return outputs.find(output => output.name === fallback)?.name ?? outputs[0]?.name ?? "";
   }
-  COMPOSITOR.event.onPointerMove(event => { pointer = { x: event.position.x, y: event.position.y }; });
+  COMPOSITOR.event.onPointerMoveAsync(event => { pointer = { x: event.position.x, y: event.position.y }; });
 
   COMPOSITOR.input.configure(input => {
     input.global = { keyboard: values.keyboard, pointer: values.pointer,

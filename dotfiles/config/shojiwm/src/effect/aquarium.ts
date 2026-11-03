@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, createAnimationController, signal, markLayerDirty,
   compileLayerEffect, compileOverlayEffect, backdropSource, shaderStage,
@@ -87,7 +88,7 @@ export function setAquariumEnabled(value: boolean): void {
 }
 
 export function aquariumOverlayEffect(outputName: string) {
-  const output = COMPOSITOR.output.current[outputName];
+  const output = outputSnapshot()[outputName];
   if (!output?.resolution || output.scale <= 0) throw new Error("Aquarium output disappeared");
   return compileOverlayEffect({
     input: backdropSource(), alpha: "preserve",
@@ -103,7 +104,7 @@ export function aquariumOverlayEffect(outputName: string) {
 
 export function aquariumMistEffect(layer: WaylandLayer) {
   if (!enabled()) return null;
-  const output = COMPOSITOR.output.current[layer.outputName()];
+  const output = outputSnapshot()[layer.outputName()];
   if (!output) return null;
   phase();
   return compileLayerEffect({

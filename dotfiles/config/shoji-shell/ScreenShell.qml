@@ -56,6 +56,7 @@ Scope {
                                 dockWindow.nearby = message.result.nearby === true;
                                 dockWindow.petSeated = message.result.petSeated === true;
                                 screenShell.chromeFullscreen = message.result.chromeFullscreen === true;
+                                screenShell.shell.snowEnabled = message.result.snowEnabled === true;
                             } else if (message.event === "dock.proximity" && message.payload.monitor === screenShell.output.name) {
                                 dockWindow.nearby = message.payload.inside === true;
                             }
@@ -239,6 +240,7 @@ Scope {
 
     PanelWindow {
         id: dockWindow
+        visible: shown || dockPill.y < height
         property bool petSeated: false
         property bool occluded: false
         property bool nearby: false
@@ -347,7 +349,9 @@ Scope {
         anchor.rect.y: 62
         grabFocus: true
         implicitWidth: 408
-        implicitHeight: panelHeight
+        // Reserve the final device-list height; animate the existing clip inside it.
+        implicitHeight: Math.max(panelHeight, Math.min(screenShell.output.height - 154,
+            popupContent.implicitHeight + (controlCentre.visible ? controlCentre.heightReserve : 0) + 40))
         readonly property string requestedPage: screenShell.panelOpen ? screenShell.shell.panelPage : ""
         property string displayedPage: ""
         property real reveal: 0
@@ -437,6 +441,7 @@ Scope {
                             ActionButton { icon.source: Qt.resolvedUrl("icons/close.svg"); hint: "Закрыть"; implicitWidth: 32; padding: 7; onClicked: screenShell.shell.panelPage = "" }
                         }
                         ControlCentre {
+                            id: controlCentre
                             Layout.fillWidth: true
                             visible: popup.displayedPage === "controls"
                             active: screenShell.shell.panelReady && popup.displayedPage === "controls"

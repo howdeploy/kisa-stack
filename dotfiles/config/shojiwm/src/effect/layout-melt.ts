@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, createAnimationController, markLayerDirty,
   compileLayerEffect, backdropSource, xrayBackdropSource, shaderStage, loadShader,
@@ -112,7 +113,7 @@ export function layoutMeltEffect(
   const right = Math.min(work[0] + work[2], Math.max(...rects.map(rect => rect[0] + rect[2])));
   const bottom = Math.min(work[1] + work[3], Math.max(...rects.map(rect => rect[1] + rect[3])));
   if (right <= left || bottom <= top) return null;
-  const scale = 1 / (COMPOSITOR.output.current[output]?.scale ?? 1);
+  const scale = 1 / (outputSnapshot()[output]?.scale ?? 1);
   // All windows share these textures. Overlap blends their colors before warping.
   const foreground = stateTexture("layout-melt-windows-v1", { scale, resize: "clear" });
   const colors = stateTexture("layout-melt-colors-v1", { scale: scale * 0.5, resize: "clear" });

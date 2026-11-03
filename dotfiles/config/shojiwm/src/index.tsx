@@ -1,3 +1,4 @@
+import { outputSnapshot } from "./output-snapshot";
 import {
   AppIcon,
   Box,
@@ -59,7 +60,7 @@ import { monitorPortalEffect, stopMonitorPortals } from "./effect/monitor-portal
 import { layoutMeltEffect, stopLayoutMelts } from "./effect/layout-melt";
 import { stopWorkspaceWaves } from "./effect/workspace-wave";
 import { wallpaperWaveEffect, setWallpaperWave, stopWallpaperWave } from "./effect/live-wallpaper-wave";
-import { snowEffect, startSnow, stopSnow } from "./effect/snow";
+import { SNOW_ENABLED, snowEffect, startSnow, stopSnow } from "./effect/snow";
 import { registerScreenShaderIpc, screenShaderPickerMapped, screenShaderPickerClosed, stopRetroScreen } from "./effect/retro-screen";
 import { aquariumMistEffect } from "./effect/aquarium";
 import { petKeepsDockVisible, registerMateEngineIpc, mateEngineLockScene } from "./mateengine";
@@ -73,7 +74,10 @@ COMPOSITOR.effect.window = (window) => isMateEngineWindow(window) ? null
     ?? dragJellyEffect(window)
     ?? windowJellyEffect(window);
 
+const PERFORMANCE_DEBUG = false;
 COMPOSITOR.env.apply({
+  SHOJI_PRESENT_RATE_DEBUG: PERFORMANCE_DEBUG ? "1" : "0",
+  SHOJI_DIRECT_SCANOUT_DEBUG: PERFORMANCE_DEBUG ? "1" : "0",
   QT_QPA_PLATFORM: "wayland;xcb",
   XDG_MENU_PREFIX: "plasma-",
   ELECTRON_OZONE_PLATFORM_HINT: "wayland",
@@ -173,7 +177,7 @@ WORKSPACE_IPC.handle("output.power", (params) => {
   return { queued: true };
 });
 registerScreenShaderIpc(WORKSPACE_IPC, (name) => {
-  const output = COMPOSITOR.output.current[name];
+  const output = outputSnapshot()[name];
   if (!output?.resolution || output.scale <= 0) return null;
   const windows = HYBRID_WINDOW_MANAGER.listWindows().filter(window => {
     if (window.state[WINDOW_STATE_MINIMIZED]() || !window.state[WINDOW_STATE_WORKSPACE_VISIBLE]()) return false;
@@ -330,6 +334,7 @@ WORKSPACE_IPC.handle("dock.get", (params) => {
     nearby: dockProximityByMonitor.get(request.monitor) === true,
     chromeFullscreen: HYBRID_WINDOW_MANAGER.hasChromeFullscreen(request.monitor),
     petSeated: petKeepsDockVisible(request.monitor, HYBRID_WINDOW_MANAGER),
+    snowEnabled: SNOW_ENABLED,
   };
 });
 
@@ -339,7 +344,7 @@ function pointerInBottomStrip(
   pointerY: number,
   stripPx: number,
 ): boolean {
-  const output = COMPOSITOR.output.get(monitor);
+  const output = outputSnapshot()[monitor];
   if (!output || !output.resolution) {
     return false;
   }
@@ -432,6 +437,10 @@ COMPOSITOR.key.bind("screenshot-region", "Super+Shift+S", () => {
   COMPOSITOR.process.spawn({
     command: [`${scripts}/screenshot-region`],
   });
+});
+
+COMPOSITOR.key.bind("screenshot-region-mouse", "Super+MouseForward", () => {
+  COMPOSITOR.process.spawn({ command: [`${scripts}/screenshot-region`] });
 });
 
 COMPOSITOR.key.bind("screenshot-all", "Super+Shift+A", () => {

@@ -17,6 +17,7 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 | `Super+L` | Lock the session |
 | `Super+W` | Wallpaper and widget preset picker |
 | `Super+Shift+S` | Screenshot editor on the current monitor |
+| `Super+MouseForward` | Screenshot editor on the current monitor; requires the pinned compositor's side-button support |
 | `Super+Q` | Close focused window |
 | `Super+S` | Toggle tiling for the current workspace |
 | `Super+F` | Fullscreen with client chrome |

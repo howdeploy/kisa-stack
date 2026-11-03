@@ -34,6 +34,11 @@ The first launch uses the **empty** preset and a bundled neutral SVG background.
 joined by Home Zone and Gaming Home Zone; integrations stay absent until enabled.
 The UI currently retains the original Russian labels. Documentation is in English.
 
+The [November 3 update](docs/update-2026-11-03.md) publishes the prepared desktop
+refactor, matching compositor fixes, mouse side-button screenshot shortcut and
+the additional NVDEC memory patch. It preserves the portable paths and integration
+opt-in gates. Runtime and memory-impact limits are recorded in that update.
+
 The [October 28 update](docs/update-2026-10-28.md) adds system settings, a PAM lock
 screen, animated native controls, compositor compatibility updates and source
 patches for wallpaper memory fixes. The [earlier October update](docs/update-2026-10-04.md)

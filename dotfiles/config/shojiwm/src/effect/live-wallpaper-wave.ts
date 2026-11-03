@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import { COMPOSITOR, markLayerDirty, compileLayerEffect, backdropSource, shaderStage, loadShader,
   stateTexture, stateSource, renderTo,
   type WaylandLayer } from "shoji_wm";
@@ -45,7 +46,7 @@ export function setWallpaperWave(value: unknown) {
 
 export function wallpaperWaveEffect(layer: WaylandLayer) {
   if (!wave) return null;
-  const output = COMPOSITOR.output.current[layer.outputName()];
+  const output = outputSnapshot()[layer.outputName()];
   if (!output) return null;
   const previous = stateTexture("wallpaper-before-v1", { resize: "clear" });
   // Keep old video moving during decoder startup. Mapping a candidate freezes

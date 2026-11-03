@@ -16,6 +16,7 @@ ColumnLayout {
     property var promptNetwork: null
     property string status: ""
     property bool outputsExpanded: false
+    readonly property real heightReserve: wifiDevices.heightReserve + bluetoothDevices.heightReserve + audioDevices.heightReserve
     spacing: 12
 
     Brightness { id: backlight; active: panel.active && panel.sectionMode === "all" }
@@ -80,6 +81,7 @@ ColumnLayout {
     }
 
     DeviceList {
+        id: wifiDevices
         expanded: panel.sectionMode !== "audio" && panel.section === "wifi"
         animate: panel.active
         RowLayout {
@@ -132,6 +134,7 @@ ColumnLayout {
     }
 
     DeviceList {
+        id: bluetoothDevices
         expanded: panel.sectionMode !== "audio" && panel.section === "bluetooth"
         animate: panel.active
         RowLayout {
@@ -244,6 +247,7 @@ ColumnLayout {
                 onClicked: panel.outputsExpanded = !panel.outputsExpanded
             }
             DeviceList {
+                id: audioDevices
                 expanded: panel.outputsExpanded
                 animate: panel.active
                 Repeater {

@@ -1,3 +1,4 @@
+import { outputSnapshot } from "./output-snapshot";
 import {
   createWindowStack,
   createWindowState,
@@ -894,7 +895,7 @@ export class HybridWindowManager {
     const gameMonitor = gameMonitorForApp(window.appId(), COMPOSITOR.output.outputs);
     const notificationMonitor = isSteamNotificationWindow(window)
       ? [...COMPOSITOR.output.list].sort((a, b) =>
-        COMPOSITOR.output.current[b].position.x - COMPOSITOR.output.current[a].position.x,
+        outputSnapshot()[b].position.x - outputSnapshot()[a].position.x,
       )[0]
       : undefined;
     const placementMonitor = gameMonitor ?? notificationMonitor;
@@ -1335,7 +1336,7 @@ export class HybridWindowManager {
 
     // An anchored avatar can have a very large transparent client whose
     // centre lies on another output. Its support owns the output instead.
-    const monitor = preferredMonitor ?? this.outputNameAt(x + rect.width / 2, y + rect.height / 2);
+    const monitor = preferredMonitor ?? this.outputNameAt(x + read(rect.width) / 2, y + read(rect.height) / 2);
     if (!monitor || monitor === workspace.monitor) {
       workspace.syncFloatingWindowRect(window, rect);
       workspace.syncWindowVisibleOutputs(window);
@@ -2027,7 +2028,7 @@ export class HybridWindowManager {
     while (current && !visited.has(current.id)) {
       if (current.state[WINDOW_STATE_PINNED]()) return true;
       visited.add(current.id);
-      const parentId = current.parentId();
+      const parentId: string | undefined = current.parentId();
       current = parentId ? this.findWindowById(parentId) : undefined;
     }
     return false;
@@ -2062,7 +2063,7 @@ export class HybridWindowManager {
   }
 
   public dockOccluded(monitor: string, width: number, height: number): boolean {
-    const output = COMPOSITOR.output.current[monitor];
+    const output = outputSnapshot()[monitor];
     if (!output?.resolution) return false;
     const left = output.position.x + (output.resolution.width / output.scale - width) / 2;
     const bottom = output.position.y + output.resolution.height / output.scale;
@@ -2075,7 +2076,7 @@ export class HybridWindowManager {
   }
 
   public hasChromeFullscreen(monitor: string): boolean {
-    if (!COMPOSITOR.output.current[monitor]) return false;
+    if (!outputSnapshot()[monitor]) return false;
     // The shell also lowers its top panel for Minecraft's native F11 fullscreen.
     return this.windowsOnMonitor(monitor).some((window) =>
       (window.state[WINDOW_STATE_FULLSCREEN_WITH_CHROME]() ||
@@ -2092,6 +2093,8 @@ export class HybridWindowManager {
       ));
   }
 
+  private usableAreaByMonitor = new Map<string, ManagedWindowRect | null>();
+
   public refreshUsableAreaLayouts() {
     this.syncWorkspaces();
     // While a window is being interactively dragged, do not re-apply the
@@ -2103,10 +2106,20 @@ export class HybridWindowManager {
     if (this.isGrabbing) {
       return;
     }
-    for (const workspace of this.workspaces.values()) {
-      workspace.refreshUsableAreaLayout();
+    const monitors = new Set(COMPOSITOR.output.list);
+    for (const monitor of this.usableAreaByMonitor.keys()) {
+      if (!monitors.has(monitor)) this.usableAreaByMonitor.delete(monitor);
     }
-    this.syncWorkspaceVisibility();
+    for (const monitor of monitors) {
+      const area = COMPOSITOR.layer.usableArea(monitor);
+      const previous = this.usableAreaByMonitor.get(monitor);
+      if (this.usableAreaByMonitor.has(monitor) &&
+          (previous === null && area === null || previous && area && managedRectEquals(previous, area))) continue;
+      this.usableAreaByMonitor.set(monitor, area);
+      for (const workspace of this.workspaces.values()) {
+        if (workspace.monitor === monitor) workspace.refreshUsableAreaLayout();
+      }
+    }
   }
 
   public switchWorkspace(direction: -1 | 1) {
@@ -3037,7 +3050,7 @@ export class HybridWindowManager {
       return usable;
     }
 
-    const output = COMPOSITOR.output.current[monitor];
+    const output = outputSnapshot()[monitor];
     if (output?.resolution) {
       return {
         x: output.position.x,
@@ -3117,7 +3130,7 @@ export class HybridWindowManager {
       this.outputNameAt(centerX, centerY) ??
       this.currentMonitor;
     const output = outputName
-      ? COMPOSITOR.output.current[outputName]
+      ? outputSnapshot()[outputName]
       : undefined;
     const usable = outputName
       ? COMPOSITOR.layer.usableArea(outputName)
@@ -3286,7 +3299,7 @@ export class HybridWindowManager {
 
   private outputNameAt(x: number, y: number): string | undefined {
     for (const name of COMPOSITOR.output.list) {
-      const output = COMPOSITOR.output.current[name];
+      const output = outputSnapshot()[name];
       if (!output?.resolution) {
         continue;
       }
@@ -3322,7 +3335,7 @@ export class HybridWindowManager {
 
   /** Full logical rect of a monitor (ignores reserved insets). */
   private monitorFullRect(monitor: string): ManagedWindowRect | null {
-    const output = COMPOSITOR.output.current[monitor];
+    const output = outputSnapshot()[monitor];
     if (!output?.resolution) {
       return null;
     }
@@ -3739,7 +3752,7 @@ export class HybridWindowManager {
       this.snapPreviewBroadcaster({ monitor, rect: null, kind });
       return;
     }
-    const output = COMPOSITOR.output.current[monitor];
+    const output = outputSnapshot()[monitor];
     const ox = output?.position.x ?? 0;
     const oy = output?.position.y ?? 0;
     this.snapPreviewBroadcaster({
@@ -5156,7 +5169,7 @@ export class Workspace {
 
   private kineticScrollIntervalMs(): number {
     const refreshRate =
-      COMPOSITOR.output.current[this.monitor]?.resolution?.refreshRate ??
+      outputSnapshot()[this.monitor]?.resolution?.refreshRate ??
       WORKSPACE_KINETIC_SCROLL_FALLBACK_REFRESH_RATE;
     return 1000 / Math.max(1, refreshRate);
   }
@@ -5577,7 +5590,7 @@ export class Workspace {
 
   private centeredFloatingRect(window: WaylandWindow): ManagedWindowRect {
     const sizeRect = this.naturalRootRect(window);
-    const monitor = COMPOSITOR.output.current[this.monitor];
+    const monitor = outputSnapshot()[this.monitor];
     if (!monitor?.resolution) {
       return sizeRect;
     }
@@ -5661,7 +5674,7 @@ export class Workspace {
    * physical pixel still accumulate instead of stalling.
    */
   private physicalAlignedScrollOffset(): number {
-    const scale = COMPOSITOR.output.current[this.monitor]?.scale ?? 0;
+    const scale = outputSnapshot()[this.monitor]?.scale ?? 0;
     if (!Number.isFinite(scale) || scale <= 0) {
       return this.scrollOffset;
     }
@@ -5789,7 +5802,7 @@ export class Workspace {
   }
 
   private tileViewportRect(): ManagedWindowRect {
-    const monitor = COMPOSITOR.output.current[this.monitor];
+    const monitor = outputSnapshot()[this.monitor];
     const usableRect = COMPOSITOR.layer.usableArea(this.monitor);
     const base =
       usableRect ??
@@ -5822,7 +5835,7 @@ export class Workspace {
 
 function fullscreenRectForOutput(window: WaylandWindow, outputName?: string): ManagedWindowRect {
   const fallback = window.state[WINDOW_STATE_RECT]();
-  const output = outputName ? COMPOSITOR.output.current[outputName] : undefined;
+  const output = outputName ? outputSnapshot()[outputName] : undefined;
   const rect = window.state[WINDOW_STATE_FULLSCREEN_ALL_OUTPUTS]()
     ? allOutputsRect(fallback)
     : output?.resolution
@@ -5840,7 +5853,7 @@ function fullscreenRectForOutput(window: WaylandWindow, outputName?: string): Ma
 function allOutputsRect(fallback: ManagedWindowRect): ManagedWindowRect {
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const name of COMPOSITOR.output.list) {
-    const output = COMPOSITOR.output.current[name];
+    const output = outputSnapshot()[name];
     if (!output?.resolution) continue;
     left = Math.min(left, output.position.x);
     top = Math.min(top, output.position.y);

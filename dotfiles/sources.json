@@ -1,9 +1,9 @@
 {
-  "snapshot_date": "2026-10-28",
+  "snapshot_date": "2026-11-03",
   "shojiwm": {
     "repository": "https://github.com/howdeploy/ShojiWM",
     "branch": "main",
-    "revision": "d78b72a4971068e37b31ea67dd2eff760fb04281",
+    "revision": "5aa1e2b0fcf706ba81036cb4ffa9db92a334efed",
     "upstream": "https://github.com/bea4dev/ShojiWM",
     "upstream_revision": "dcea1dd",
     "pull_requests": [105, 106, 107, 108, 109, 122]

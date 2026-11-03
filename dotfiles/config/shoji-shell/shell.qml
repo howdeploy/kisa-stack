@@ -11,6 +11,7 @@ import Quickshell.Wayland
 
 ShellRoot {
     id: root
+    property bool snowEnabled: false
     MateEngineIdle {}
     readonly property var sessionLock: Lock
     Connections {
@@ -129,9 +130,11 @@ ShellRoot {
     }
     Variants {
         model: Quickshell.screens
-        SnowLayer {
+        delegate: Loader {
+            id: snowLoader
             required property var modelData
-            output: modelData
+            active: root.snowEnabled
+            sourceComponent: SnowLayer { output: snowLoader.modelData }
         }
     }
 }

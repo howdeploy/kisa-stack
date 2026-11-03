@@ -7,6 +7,7 @@ Item {
     property bool animate: true
     default property alias contents: body.data
     implicitHeight: expanded ? body.implicitHeight : 0
+    readonly property real heightReserve: expanded || implicitHeight > 0 ? Math.max(0, body.implicitHeight - implicitHeight) : 0
     Layout.fillWidth: true
     Layout.minimumHeight: 0
     Layout.maximumHeight: implicitHeight

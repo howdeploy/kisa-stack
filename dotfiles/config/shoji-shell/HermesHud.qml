@@ -34,6 +34,8 @@ Scope {
     readonly property bool opensUp: wavePlacement.vertical === "bottom"
     property bool shown: true
     property bool expanded: false
+    property real bodyReveal: expanded ? 1 : 0
+    Behavior on bodyReveal { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     property bool pinned: false
     property bool ready: false
     property int sequence: 0
@@ -314,7 +316,7 @@ Scope {
             viewportSize: Qt.size(root.output ? root.output.width : 1, root.output ? root.output.height : 1)
             captureOrigin: Qt.vector2d(
                 WidgetLayouts.horizontalPosition(root.wavePlacement, viewportSize.width, panel.width),
-                WidgetLayouts.verticalPosition(root.wavePlacement, viewportSize.height, panel.height))
+                WidgetLayouts.verticalPosition(root.wavePlacement, viewportSize.height, panel.height) + panelContent.y)
         }
     }
     PanelWindow {
@@ -330,8 +332,7 @@ Scope {
         margins.left: root.wavePlacement.x
         margins.right: root.wavePlacement.horizontal === "center" ? -root.wavePlacement.x : root.wavePlacement.x
         implicitWidth: Math.min(480, root.output ? root.output.width - 32 : 480)
-        implicitHeight: composerSurface.implicitHeight + (root.expanded ? bodyRow.implicitHeight : 0)
-        Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        implicitHeight: composerSurface.implicitHeight + (root.expanded || root.bodyReveal > 0 ? bodyRow.implicitHeight : 0)
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
         WlrLayershell.namespace: "no_blur"
@@ -341,7 +342,9 @@ Scope {
 
         Item {
             id: panelContent
-            anchors.fill: parent
+            width: parent.width
+            height: composerSurface.implicitHeight + root.bodyReveal * bodyRow.implicitHeight
+            y: root.opensUp ? parent.height - height : 0
             clip: true
             enabled: !LiveWallpapers.busy && !(root.transition && (root.transition.preparing || (root.transition.transitioning
                 && (root.beforeVisible !== root.afterVisible || root.relocating))))
@@ -351,7 +354,7 @@ Scope {
                 screenSize: Qt.size(root.output ? root.output.width : 1, root.output ? root.output.height : 1)
                 localOrigin: Qt.vector2d(
                     WidgetLayouts.horizontalPosition(root.wavePlacement, screenSize.width, panel.width),
-                    WidgetLayouts.verticalPosition(root.wavePlacement, screenSize.height, panel.height))
+                    WidgetLayouts.verticalPosition(root.wavePlacement, screenSize.height, panel.height) + panelContent.y)
                 widgetSize: Qt.size(panelContent.width, panelContent.height)
                 localProgress: root.transition ? root.transition.progress : 1
                 localBefore: root.beforeVisible && !root.relocating ? 1 : 0

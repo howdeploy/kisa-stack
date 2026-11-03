@@ -1,6 +1,17 @@
 # Fork and contribution provenance
 
-## Current desktop snapshot (2026-10-28)
+## Current desktop snapshot (2026-11-03)
+
+Use `main` at
+[`5aa1e2b0fcf706ba81036cb4ffa9db92a334efed`](https://github.com/howdeploy/ShojiWM/commit/5aa1e2b0fcf706ba81036cb4ffa9db92a334efed).
+This publishes the prepared compositor refactor on top of `d78b72a`, including
+decoration/cache fixes, output-scoped layer redraws, bounded shared-memory
+screencopy and mouse side-button shortcuts. The dotfiles builder reads the
+matching pin from `sources.json`. See the [November update](update-2026-11-03.md)
+and the fork's snapshot notes for historical checks and remaining runtime work.
+No new build or tests were run during publication.
+
+## Earlier desktop snapshot (2026-10-28)
 
 Use `main` at
 [`d78b72a4971068e37b31ea67dd2eff760fb04281`](https://github.com/howdeploy/ShojiWM/commit/d78b72a4971068e37b31ea67dd2eff760fb04281).

@@ -17,6 +17,8 @@ RULES = {
 }
 DISALLOWED = re.compile(r"(?:^|/)(?:auth\.json|hosts\.yml|integrations\.env|wallpapers\.json|system-settings\.json|\.env(?:\.[^/]+)?|.*\.(?:sqlite3?|db|log|pem|key|qsb|pyc)|.*(?:\.bak|\.backup).*)(?:$|/)")
 BINARY = {"dotfiles/config/shoji-shell/assets/panel-grain.png", "dotfiles/config/walker/themes/shoji/grain.png"}
+# Stationary procedural grain tile shared by the existing widget surfaces.
+BINARY.add("dotfiles/config/shoji-shell/assets/widget-grain.png")
 # Reviewed generated sprite sheets used by HomeMascots.js; no screenshots.
 BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v2/{digit}.png" for digit in range(10))
 BINARY.update(f"dotfiles/config/shoji-shell/assets/home-clock-v3/{digit}.png" for digit in (0, 2, 4, 9))

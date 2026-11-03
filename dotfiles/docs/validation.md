@@ -1,5 +1,18 @@
 # Validation record
 
+## 2026-11-03 desktop refactor and wallpaper memory publication
+
+The November 2 refactor's deltas were merged into the current public sources,
+retaining portable paths and integration opt-in gates. The procedural grain tile
+is included in the reviewed asset allowlist. The compositor pin now points to
+`5aa1e2b`; the wallpaper builder also applies the pinned NVDEC pool patch.
+
+Publication checks cover the staged privacy scan, whitespace and source/diff
+review. No tests, build, typecheck, lint, installer, GUI or memory benchmark was
+run for this publication. The earlier preparation's build/test results describe
+its local sources and do not validate the sanitized merge or combined wallpaper
+recipe. See [the update](update-2026-11-03.md) for details and remaining checks.
+
 ## 2026-11-02 native YouTube title follow-up
 
 A later playlist transition exposed a stale watch URL shared by integration and

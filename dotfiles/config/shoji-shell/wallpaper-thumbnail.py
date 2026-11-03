@@ -55,6 +55,22 @@ def thumbnail(url, cache_root):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--size":
+        url = sys.argv[2]
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+                raise ValueError("Expected a local file URL")
+            from PIL import Image
+            with Image.open(unquote(parsed.path)) as image:
+                width, height = image.size
+            if width <= 0 or height <= 0:
+                raise ValueError("Invalid image dimensions")
+            result = {"url": url, "width": width, "height": height}
+        except (OSError, ValueError, ImportError) as error:
+            result = {"url": url, "error": str(error)}
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return
     url = sys.argv[1]
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     if not cache.is_absolute():

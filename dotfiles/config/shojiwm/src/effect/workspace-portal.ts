@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, compileWindowEffect, createWindowState, cubicBezier,
   dualKawaseBlur, get, loadShader, read, save, shaderStage, windowSource,
@@ -22,7 +23,7 @@ export function setWorkspacePortal(
   const edge = offsetY < 0 ? -1 : 1;
   if (preserveCurrent && window.state[PORTAL]()?.edge === edge) return;
   const usable = COMPOSITOR.layer.usableArea(monitor);
-  const output = COMPOSITOR.output.current[monitor];
+  const output = outputSnapshot()[monitor];
   const viewport: [number, number, number, number] = usable
     ? [read(usable.x), read(usable.y), read(usable.width), read(usable.height)]
     : [output?.position.x ?? 0, output?.position.y ?? 0,

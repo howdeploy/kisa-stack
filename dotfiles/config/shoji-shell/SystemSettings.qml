@@ -1,10 +1,12 @@
 pragma Singleton
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
 
 Singleton {
     id: root
+    readonly property var socket: connection.item
     property bool opened: false
     property string targetOutput: ""
     readonly property var targetScreen: Quickshell.screens.find(s => s.name === targetOutput) || null
@@ -18,7 +20,7 @@ Singleton {
     readonly property var outputs: snapshot.outputs || []
     readonly property var devices: snapshot.devices || []
     readonly property var trial: snapshot.trial || null
-    readonly property bool available: socket.connected && snapshot.version === 1
+    readonly property bool available: (root.socket && root.socket.connected) && snapshot.version === 1
     readonly property bool busy: mutation !== 0 || saving
     property string error: ""
     property string status: ""
@@ -59,7 +61,7 @@ Singleton {
     }
     function close() { opened = false; pendingTarget = 0; if (trial) send("settings.revert", {}); }
     function send(method, params) {
-        if (!socket.connected) return 0;
+        if (!(root.socket && root.socket.connected)) return 0;
         const id = ++sequence;
         socket.write(JSON.stringify({ id: id, method: method, params: params || {} }) + "\n");
         socket.flush();
@@ -172,53 +174,59 @@ Singleton {
             reload();
         }
     }
-    Socket {
-        id: socket
-        path: Quickshell.env("XDG_RUNTIME_DIR") + "/shojiwm-" + Quickshell.env("WAYLAND_DISPLAY") + ".sock"
-        connected: true
-        onConnectionStateChanged: {
-            root.snapshot = ({});
-            root.restoreAttempted = false;
-            root.mutation = 0;
-            requestTimeout.stop();
-            if (connected) root.refresh();
-            else root.close();
-        }
-        parser: SplitParser {
-            onRead: line => {
-                try {
-                    const message = JSON.parse(line);
-                    if (message.id === root.pendingTarget && root.pendingTarget !== 0) {
-                        root.pendingTarget = 0;
-                        if (message.error) root.error = String(message.error);
-                        else root.showOn(message.result.output);
-                        return;
+    Loader {
+        id: connection
+        onLoaded: { if (item.connected) root.refresh(); }
+        sourceComponent: Component {
+            Socket {
+                path: Quickshell.env("XDG_RUNTIME_DIR") + "/shojiwm-" + Quickshell.env("WAYLAND_DISPLAY") + ".sock"
+                connected: true
+                onConnectionStateChanged: {
+                    root.snapshot = ({});
+                    root.restoreAttempted = false;
+                    root.mutation = 0;
+                    requestTimeout.stop();
+                    if (connected) root.refresh();
+                    else root.close();
+                }
+                parser: SplitParser {
+                    onRead: line => {
+                        try {
+                            const message = JSON.parse(line);
+                            if (message.id === root.pendingTarget && root.pendingTarget !== 0) {
+                                root.pendingTarget = 0;
+                                if (message.error) root.error = String(message.error);
+                                else root.showOn(message.result.output);
+                                return;
+                            }
+                            if (message.event === "settings.changed") {
+                                root.snapshot = message.payload;
+                                root.restore();
+                                return;
+                            }
+                            if (message.id === root.mutation && root.mutation !== 0) {
+                                requestTimeout.stop();
+                                const method = root.mutationMethod;
+                                root.mutation = 0;
+                                if (message.error) { root.error = String(message.error); root.refresh(); return; }
+                                root.snapshot = message.result;
+                                if (method === "settings.input" || method === "settings.confirm") {
+                                    root.document = Object.assign({}, root.document, { values: root.copy(root.values) });
+                                    root.save();
+                                } else if (method === "settings.restore") root.status = "Сохранённые настройки отправлены ShojiWM";
+                                return;
+                            }
+                            if (message.result && message.result.version === 1) {
+                                root.snapshot = message.result;
+                                root.restore();
+                            }
+                        } catch (failure) { root.error = "Не удалось прочитать ответ ShojiWM"; }
                     }
-                    if (message.event === "settings.changed") {
-                        root.snapshot = message.payload;
-                        root.restore();
-                        return;
-                    }
-                    if (message.id === root.mutation && root.mutation !== 0) {
-                        requestTimeout.stop();
-                        const method = root.mutationMethod;
-                        root.mutation = 0;
-                        if (message.error) { root.error = String(message.error); root.refresh(); return; }
-                        root.snapshot = message.result;
-                        if (method === "settings.input" || method === "settings.confirm") {
-                            root.document = Object.assign({}, root.document, { values: root.copy(root.values) });
-                            root.save();
-                        } else if (method === "settings.restore") root.status = "Сохранённые настройки отправлены ShojiWM";
-                        return;
-                    }
-                    if (message.result && message.result.version === 1) {
-                        root.snapshot = message.result;
-                        root.restore();
-                    }
-                } catch (failure) { root.error = "Не удалось прочитать ответ ShojiWM"; }
+                }
             }
         }
     }
+
     Connections {
         target: Quickshell
         function onScreensChanged(): void {
@@ -234,5 +242,5 @@ Singleton {
             root.refresh();
         }
     }
-    Timer { interval: 1500; repeat: true; running: !socket.connected; onTriggered: socket.connected = true }
+    Timer { interval: 1500; repeat: true; running: !(root.socket && root.socket.connected); onTriggered: { connection.active = false; connection.active = true; } }
 }

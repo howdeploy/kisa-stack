@@ -1,3 +1,4 @@
+import { outputSnapshot } from "./output-snapshot";
 import { COMPOSITOR, read, type WaylandWindow, type PointerMoveEvent } from "shoji_wm";
 import type { IpcServer } from "shoji_wm/ipc";
 import {
@@ -46,11 +47,11 @@ export function mateEngineLockScene(wm: HybridWindowManager) {
     ? configure({ windowIds: mate && pet ? [pet.id] : [], layerIds: wallpaperLayers.map(layer => layer.id) })
     : typeof legacy === "function" && legacy(mate);
   const rect = mate && pet ? windowRect(pet) : null;
-  const backgroundOutputs = COMPOSITOR.output.outputs.filter(output =>
+  const backgroundOutputs = Object.values(outputSnapshot()).filter(output => output.enabled && (
     wallpaperLayers.some(layer => layer.outputName === output.name)
     || (locked && rect && output.resolution && rect.x < output.position.x + output.resolution.width / output.scale
       && rect.y < output.position.y + output.resolution.height / output.scale
-      && rect.x + rect.width > output.position.x && rect.y + rect.height > output.position.y))
+      && rect.x + rect.width > output.position.x && rect.y + rect.height > output.position.y)))
     .map(output => output.name);
   return { native: typeof configure === "function" || typeof legacy === "function",
     locked, mateEngine: locked && mate, backgroundOutputs };
@@ -62,7 +63,7 @@ export function petKeepsDockVisible(monitor: string, wm: HybridWindowManager): b
   if (!pet || !pet.state[WINDOW_STATE_WORKSPACE_VISIBLE]() || pet.state[WINDOW_STATE_MINIMIZED]() ||
       Date.now() - seating.updated > 1500 || !dock?.rect || Date.now() - dock.updated > 1500) return false;
   if (seating.target === `dock:${monitor}`) return true;
-  const output = COMPOSITOR.output.current[monitor];
+  const output = outputSnapshot()[monitor];
   if (!output || !seating.probe) return false;
   const x = output.position.x + dock.rect.x;
   const y = output.position.y + dock.rect.y;
@@ -94,7 +95,7 @@ function surfaces(wm: HybridWindowManager, zIndex: (window: WaylandWindow) => nu
   // ledges: sitting above the upper bar would put the avatar off screen.
   for (const [name, dock] of shellDocks) {
     if (!dock.rect || Date.now() - dock.updated > 1500) continue;
-    const output = COMPOSITOR.output.current[name];
+    const output = outputSnapshot()[name];
     if (!output) continue;
     const rect = { ...dock.rect, x: output.position.x + dock.rect.x, y: output.position.y + dock.rect.y };
     if (rect.width <= 0 || rect.height <= 0) continue;
@@ -123,7 +124,7 @@ function windowRect(window: WaylandWindow): Rect {
 function outputs() {
   const result: (Rect & { name: string; usable: Rect | null })[] = [];
   for (const name of COMPOSITOR.output.list) {
-    const output = COMPOSITOR.output.current[name];
+    const output = outputSnapshot()[name];
     if (!output?.resolution || output.scale <= 0) continue;
     result.push({
       name,
@@ -174,7 +175,7 @@ export function registerMateEngineIpc(
       surface.z > petZ && contains(surface.visualRect ?? surface.rect, pointer!));
     if (pointerTarget.kind === "layer") {
       const layer = COMPOSITOR.layer.current[pointerTarget.layerId];
-      const output = layer && COMPOSITOR.output.current[layer.outputName];
+      const output = layer && outputSnapshot()[layer.outputName];
       if (pointer && layer && output && (layer.layer === "top" || layer.layer === "overlay")) {
         covered ||= contains({ ...layer.position, x: output.position.x + layer.position.x,
           y: output.position.y + layer.position.y }, pointer);

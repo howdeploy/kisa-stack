@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, createAnimationController, markLayerDirty,
   compileLayerEffect, layerSource, shaderStage, loadShader, type WaylandLayer,
@@ -26,7 +27,7 @@ export function stopSnow(): void {
 
 export function snowEffect(layer: WaylandLayer) {
   if (!SNOW_ENABLED) return null;
-  const output = COMPOSITOR.output.current[layer.outputName()];
+  const output = outputSnapshot()[layer.outputName()];
   if (!output) return null;
   const phase = animation.variable(CLOCK);
   phase(); // Track the clock in this layer's composition, as with the portal effect.
@@ -35,7 +36,7 @@ export function snowEffect(layer: WaylandLayer) {
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const surface of Object.values(COMPOSITOR.layer.current)) {
     if (surface.namespace !== "shoji-wallpaper-wave") continue;
-    const screen = COMPOSITOR.output.current[surface.outputName];
+    const screen = outputSnapshot()[surface.outputName];
     if (!screen) continue;
     const { x, y, width, height } = surface.position;
     left = Math.min(left, screen.position.x + x);
@@ -43,7 +44,7 @@ export function snowEffect(layer: WaylandLayer) {
     right = Math.max(right, screen.position.x + x + width);
     bottom = Math.max(bottom, screen.position.y + y + height);
   }
-  const desktop = Number.isFinite(left)
+  const desktop: [number, number, number, number] = Number.isFinite(left)
     ? [left, top, right - left, bottom - top]
     : [output.position.x, output.position.y, layer.position.width, layer.position.height];
   return compileLayerEffect({

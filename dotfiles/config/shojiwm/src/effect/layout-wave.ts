@@ -1,3 +1,4 @@
+import { outputSnapshot } from "../output-snapshot";
 import {
   COMPOSITOR, animationVariable, createAnimationController, markLayerDirty,
   compileLayerEffect, backdropSource, shaderStage, loadShader, cubicBezier, read,
@@ -99,7 +100,7 @@ export function layoutWaveEffect(layer: WaylandLayer, visibleWindows: () => { id
   const time = water.animation.variable(CLOCK)();
   if (time >= water.end || !water.animation.running(CLOCK)) return null;
   const size: [number, number] = [layer.position.width, layer.position.height];
-  const outputScale = COMPOSITOR.output.current[output]?.scale ?? 1;
+  const outputScale = outputSnapshot()[output]?.scale ?? 1;
   // History supplies the wake; this texture only combines it for the current frame.
   const field = stateTexture("layout-parting-lines-v1", {
     scale: 1 / outputScale, format: "rgba16f", resize: "clear",

@@ -26,6 +26,10 @@ Adapt the templates before copying them into your global configuration. Integrat
 
 [dotfiles/](dotfiles/) contains ShojiWM, Quickshell, Walker, shaders and the portable desktop setup. Follow its own [README](dotfiles/README.md) for installation; desktop configuration is separate from the coding-agent workflow.
 
+The [November 3 update](dotfiles/docs/update-2026-11-03.md) publishes the desktop
+refactor and matching compositor pin. The [wallpaper memory guide](dotfiles/docs/wallpaper-engine.md)
+covers the separate engine/mpv repairs and private-runtime build.
+
 ## Archived skills
 
 [skills/](skills/) preserves earlier task-specific skills for reference. **They are not my current workflow or a recommended starter bundle.** The old bulk-install command is disabled so it cannot install that archive as the current stack.
