@@ -31,6 +31,21 @@ The mpv fix is already upstream in mpv-player/mpv#17303. It is retained here
 because the reproducible source recipe uses the earlier pinned mpv revision.
 Do not apply it again to a moving upstream checkout.
 
+## November 3 memory patch publication
+
+The builder now also applies `mpv-nvdec-lazy-pool.patch` to the pinned mpv 0.41.0
+source. When NVDEC supports a device context, it selects that path so FFmpeg
+avoids preallocating a separate CUDA frame pool unused by decoder-owned output.
+This complements the OpenGL fence-lifetime fix; neither patch is a system-wide
+RAM limit. Static image decoding and transition textures are addressed separately
+by the [desktop refactor](update-2026-11-03.md).
+
+The engine repair and both mpv patches are also published independently on
+[howdeploy/linux-wallpaperengine's memory-fix branch](https://github.com/howdeploy/linux-wallpaperengine/tree/fix/wallpaper-memory-20261103/contrib/wallpaper-memory).
+That kit includes application instructions and historical memory observations.
+The earlier local incident nearly exhausted system RAM; no percentage reduction
+or fixed memory ceiling is established for this combined source publication.
+
 ## Build, review, install
 
 Install the core dependencies and the additional
@@ -43,7 +58,7 @@ grep -v '^#' dotfiles/dependencies/arch-wallpaper.txt | xargs sudo pacman -S --n
 ```
 
 The script reads pins from `sources.json`, builds pinned codec headers into its
-work directory, builds private mpv, applies the two engine patches, and builds
+work directory, builds private mpv with both patches, applies the two engine patches, and builds
 the full engine executable and CEF resources. CEF is downloaded by upstream's
 CMake configuration. Default build parallelism is two; override it with a
 positive `CMAKE_BUILD_PARALLEL_LEVEL` if needed. Native build libraries and disk
@@ -88,6 +103,7 @@ using their manifest from another working session after stopping the renderer.
 The earlier synchronous repair had a local build, 32 mpv tests, an ASan D-Bus
 harness and NVIDIA/NVDEC 4K playback observations. Those results do **not**
 validate the subsequent asynchronous revision or this new bundle builder.
+They also predate the NVDEC pool patch and do not validate its memory impact.
 
 The current source recipe, installer changes and launch-path regression tests
 have not been built or run. A clean-machine build, deliberate playback and memory

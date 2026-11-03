@@ -1,0 +1,21 @@
+diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
+index 399e1d5..b1e181d 100644
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -381,10 +381,12 @@ static void add_all_hwdec_methods(struct hwdec_info **infos, int *num_infos)
+ 
+                 snprintf(info.method_name, sizeof(info.method_name), "%s", name);
+ 
+-                // Usually we want to prefer using hw_frames_ctx for true
+-                // hwaccels only, but we actually don't have any way to detect
+-                // those, so always use hw_frames_ctx if offered.
+-                if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_FRAMES_CTX) {
++                // NVDEC maps decoder-owned output; let FFmpeg avoid preallocating
++                // a separate CUDA frame pool that this path does not use.
++                bool nvdec_device_ctx = strcmp(name, "nvdec") == 0 &&
++                    (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX);
++                if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_FRAMES_CTX) &&
++                    !nvdec_device_ctx) {
+                     info.use_hw_frames = true;
+                 } else {
+                     info.use_hw_device = true;

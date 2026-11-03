@@ -18,6 +18,7 @@ make -C "$work/headers" PREFIX="$work/headers-install" install
 export PKG_CONFIG_PATH="$work/headers-install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 clone "$(pin mpv_repository)" "$work/mpv" "$(pin mpv_revision)"
 git -C "$work/mpv" apply "$root/patches/wallpaper-engine/mpv-opengl-fence.patch"
+git -C "$work/mpv" apply "$root/patches/wallpaper-engine/mpv-nvdec-lazy-pool.patch"
 meson setup "$work/mpv/build" "$work/mpv" --prefix="$work/mpv-install" --libdir=lib \
     --buildtype=release -Dlibmpv=true -Dcplayer=false -Dtests=false
 meson compile -C "$work/mpv/build" -j "$jobs"

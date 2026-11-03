@@ -28,6 +28,7 @@
     "mpv_repository": "https://github.com/mpv-player/mpv",
     "mpv_revision": "41f6a645068483470267271e1d09966ca3b9f413",
     "mpv_patch": "patches/wallpaper-engine/mpv-opengl-fence.patch",
+    "mpv_nvdec_patch": "patches/wallpaper-engine/mpv-nvdec-lazy-pool.patch",
     "nvcodec_headers_repository": "https://github.com/FFmpeg/nv-codec-headers",
     "nvcodec_headers_revision": "0a6fba9a2820628b8103464f4c8753ee05838baa"
   },
