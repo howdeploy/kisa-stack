@@ -29,6 +29,8 @@
     "cloud-fog": "cloud-fog",
     "cloud-rain": "cloud-rain",
     "cloud-snow": "cloud-snow",
-    "cloud-lightning": "cloud-lightning"
+    "cloud-lightning": "cloud-lightning",
+    "screenshot-window": "app-window (adapted)",
+    "screenshot-ocr": "scan-text (adapted)"
   }
 }

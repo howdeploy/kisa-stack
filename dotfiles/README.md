@@ -34,6 +34,11 @@ The first launch uses the **empty** preset and a bundled neutral SVG background.
 joined by Home Zone and Gaming Home Zone; integrations stay absent until enabled.
 The UI currently retains the original Russian labels. Documentation is in English.
 
+The [November 9 update](docs/update-2026-11-09.md) adds resizable tiles, floating
+size restoration, fullscreen/focus repairs, a 700 ms close reflow and a frozen-frame
+screenshot picker with window capture and OCR. The publication retains portable
+paths and the existing integration opt-in gates.
+
 The [November 3 update](docs/update-2026-11-03.md) publishes the prepared desktop
 refactor, matching compositor fixes, mouse side-button screenshot shortcut and
 the additional NVDEC memory patch. It preserves the portable paths and integration

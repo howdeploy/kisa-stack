@@ -4,7 +4,7 @@ set -euo pipefail
 exec 9>"${XDG_RUNTIME_DIR:?}/shoji-screenshot.lock"
 flock -n 9 || exit 0
 export QT_QPA_PLATFORM=wayland
-monitor_index=$(python3 - <<'PY'
+monitor_index=$(python3 - "$@" <<'PY'
 import json
 import os
 import re
@@ -26,6 +26,8 @@ try:
                     break
             else:
                 raise ValueError('ShojiWM did not return the active monitor')
+    if len(sys.argv) > 1:
+        monitor = sys.argv[1]
     # Flameshot uses Qt screen indices, which need not match compositor order.
     screens = subprocess.run(
         ['qtdiag6', '--no-gl', '--no-vulkan', '--no-rhi'],

@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Copy text from a selected Wayland screen region without saving the image."""
+
+import argparse
+import fcntl
+from io import BytesIO
+import os
+from pathlib import Path
+import re
+import resource
+import shutil
+import subprocess
+import sys
+
+from PIL import Image, ImageOps, ImageStat
+
+
+def limit_ocr():
+    # Bound the OCR child, leaving the compositor and clipboard process unaffected.
+    resource.setrlimit(resource.RLIMIT_AS, (1024**3, 1024**3))
+    os.nice(5)
+
+
+def prepare_image(png):
+    with Image.open(BytesIO(png)) as source:
+        image = ImageOps.grayscale(source)
+    dark_background = ImageStat.Stat(image).median[0] < 128
+    if dark_background:
+        image = ImageOps.invert(image)
+    image = ImageOps.autocontrast(image)
+    # Enlarge small glyphs without multiplying a large screenshot's memory use.
+    scale = max(1.0, min(3.0, (16_000_000 / (image.width * image.height)) ** 0.5))
+    if scale > 1:
+        image = image.resize(
+            (round(image.width * scale), round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+    if dark_background:
+        # shortcut: faint text may be lost; revisit on low-contrast screenshots.
+        image = image.point(lambda pixel: 0 if pixel < 140 else 255)
+    image = ImageOps.expand(image, border=10, fill="white")
+    output = BytesIO()
+    image.save(output, format="PNG", dpi=(300, 300))
+    return output.getvalue()
+
+
+def copy_selection(language):
+    languages = subprocess.run(
+        ["tesseract", "--list-langs"], check=True, capture_output=True,
+        text=True, timeout=5,
+    ).stdout.splitlines()
+    if not set(language.split("+")).issubset(languages):
+        raise RuntimeError("Не установлены выбранные языки Tesseract: " + language)
+
+    selection = subprocess.run(
+        ["slurp", "-f", "%x,%y %wx%h"], stdin=subprocess.DEVNULL,
+        capture_output=True, text=True,
+    )
+    if selection.returncode == 1 and selection.stderr.strip() in ("", "selection cancelled"):
+        return None
+    if selection.returncode:
+        raise RuntimeError("Не удалось выбрать область экрана.")
+    geometry = selection.stdout.strip()
+    if not re.fullmatch(r"-?\d+,-?\d+ [1-9]\d*x[1-9]\d*", geometry):
+        raise RuntimeError("Получена некорректная область экрана.")
+
+    image = subprocess.run(
+        ["grim", "-g", geometry, "-"], check=True,
+        capture_output=True, timeout=10,
+    ).stdout
+    result = subprocess.run(
+        ["tesseract", "stdin", "stdout", "--oem", "1", "--psm", "3",
+         "-l", language, "-c", "preserve_interword_spaces=1", "-c", "page_separator="],
+        input=prepare_image(image), check=True, capture_output=True, timeout=30,
+        env=dict(os.environ, OMP_THREAD_LIMIT="2", OMP_NUM_THREADS="2"),
+        preexec_fn=limit_ocr,
+    )
+    text = result.stdout.decode("utf-8").replace("\f", "").strip("\r\n")
+    if not text.strip():
+        return "Текст не найден. Буфер обмена сохранён."
+
+    subprocess.run(
+        ["wl-copy", "--type", "text/plain;charset=utf-8"],
+        input=text.encode("utf-8"), check=True, timeout=5,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return "Текст скопирован."
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lang", choices=["rus+eng", "rus", "eng"], default="rus+eng")
+    args = parser.parse_args()
+    try:
+        for tool in ("slurp", "grim", "tesseract", "wl-copy"):
+            if not shutil.which(tool):
+                raise RuntimeError("Не найдена программа: " + tool)
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if not runtime:
+            raise RuntimeError("Нет доступа к Wayland-сессии: XDG_RUNTIME_DIR не задан.")
+        with (Path(runtime) / "shoji-screenshot.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return 0
+            message = copy_selection(args.lang)
+        if message and shutil.which("notify-send"):
+            try:
+                subprocess.run(
+                    ["notify-send", "Копирование текста", message],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                )
+            except (OSError, subprocess.SubprocessError):
+                pass  # Notification failure must not turn a completed copy into an error.
+        return 0
+    except subprocess.CalledProcessError as error:
+        print(f"Ошибка {error.cmd[0]}. Буфер мог не обновиться.", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("Превышено время выполнения OCR или копирования.", file=sys.stderr)
+    except (OSError, RuntimeError, UnicodeError, subprocess.SubprocessError) as error:
+        print(str(error), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

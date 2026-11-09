@@ -16,7 +16,7 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 | `Super+I` | System settings on the output under the pointer |
 | `Super+L` | Lock the session |
 | `Super+W` | Wallpaper and widget preset picker |
-| `Super+Shift+S` | Screenshot editor on the current monitor |
+| `Super+Shift+S` | Frozen-frame picker: Flameshot, active window or OCR |
 | `Super+MouseForward` | Screenshot editor on the current monitor; requires the pinned compositor's side-button support |
 | `Super+Q` | Close focused window |
 | `Super+S` | Toggle tiling for the current workspace |
@@ -24,6 +24,7 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 | `Super+M` | Maximize/restore |
 | `Super+Left/Right` | Focus previous/next window |
 | `Super+Shift+Left/Right` | Reorder windows |
+| `Super+Shift+Right mouse button` | Resize a window; in tiling, move shared boundaries |
 | `Super+Ctrl+Up/Down` | Switch workspace |
 | `Super+Shift+R` | Reload compositor configuration |
 | `Super+Shift+Q` | End compositor session (save your work first) |
@@ -31,6 +32,21 @@ Bindings live in `shojiwm/src/index.tsx`; behavior lives in `src/window-manager.
 Keyboard layouts are `us,ru`, toggled with Alt+Shift. Change the input configuration
 for your languages and pointer/trackpad preferences. The public setup does not
 autostart a VPN or reference the author's application profiles.
+
+Drag an internal tiled window edge to redistribute width between neighbours in
+the same row, or height between adjacent rows. Corner drags adjust both axes.
+Client size limits constrain the split. Proportions survive a config reload;
+incompatible row/column weights reset when the grid shape changes.
+
+Moving a tile to a floating workspace restores its previous floating size. Without
+a valid saved size, it uses 60% of the target viewport width and 70% of its height,
+bounded by the output and client constraints. On close, neighbours reflow alongside
+the dissolving window over 700 ms with smooth acceleration and deceleration.
+
+Focusing another ordinary window on the same workspace exits the previous fullscreen.
+Dialogs, PiP, pinned windows and MateEngine keep their above-fullscreen behaviour.
+An independent fullscreen on another output is preserved. Switching floating/tiling
+also exits fullscreen before applying the new layout; minimized windows stay hidden.
 
 ## Monitors, wallpaper and presets
 
@@ -139,7 +155,16 @@ and privileged recovery actions are machine-specific.
 
 Ghostty's config retains the Mocha styling and physical-key EN/RU shortcuts. It
 expects zsh; change `command` and `shell-integration` together for another shell.
-The screenshot helper needs Flameshot, grim, Qt's `qtdiag6` and the portal setup.
+The screenshot helpers need Flameshot, grim, Qt's `qtdiag6` and the portal setup.
+`Super+Shift+S` captures one cursor-free monitor frame before the picker takes focus,
+preserving open application menus. The frame stays behind the external selector
+until Flameshot maps its editor or the selected capture command exits. Escape or an
+outside click cancels the picker; arrows/Tab and Enter choose an action.
+The window action saves the visible desktop crop at the active window's bounds;
+menus extending beyond those bounds require region selection instead.
+OCR uses slurp, Pillow, Tesseract and the installed `rus`/`eng` language data, then
+copies text locally with wl-copy. It does not upload the image or save a temporary PNG.
+`Super+MouseForward` still opens Flameshot directly.
 Brightness uses DDC/CI and `ddcutil`; grant access through your distribution's
 normal device rules if needed. It does not silently change permissions.
 

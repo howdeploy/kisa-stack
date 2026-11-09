@@ -33,6 +33,7 @@ ShellRoot {
             || (SystemSettings.opened && SystemSettings.page === "audio")
     }
     SystemSettingsDrawer {}
+    ScreenshotPicker {}
     Connections {
         target: SystemSettings
         function onOpenedChanged(): void { if (SystemSettings.opened) root.panelPage = ""; }

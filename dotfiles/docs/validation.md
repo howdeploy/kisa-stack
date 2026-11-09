@@ -1,5 +1,25 @@
 # Validation record
 
+## 2026-11-09 window management and frozen screenshots
+
+The source update carries the installed window-size restoration, resizable grid,
+fullscreen/focus repair and the accepted 700 ms close reflow. Earlier isolated
+checks exercised actual window-manager/rect-animation code with stub runtime
+objects. The owner confirmed the size restoration, tile resizing and final close
+timing in the installed desktop.
+
+The screenshot picker now captures a single frame before taking focus. Its local
+state-transition check covered capture ordering, retained frame, editor handoff,
+cancellation, lock and all three actions. The installed shell loaded that QML;
+those checks do not establish successful rendering of every application menu.
+
+The publication adapts the picker paths to Settings.configHome, connects its
+portable hotkey and includes the required capture helpers/icons. Privacy review
+covers the publication tree and exact staged blobs, plus manual inspection of
+paths, commands, integration gates and the selected text/SVG additions. No live
+configuration, account state, screenshot, cache or backup directory is exported.
+This sanitized source update has no new build, typecheck, installer or GUI run.
+
 ## 2026-11-03 desktop refactor and wallpaper memory publication
 
 The November 2 refactor's deltas were merged into the current public sources,

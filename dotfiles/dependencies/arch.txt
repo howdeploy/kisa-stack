@@ -56,6 +56,10 @@ python-numpy
 python-pillow
 flameshot
 grim
+slurp
+tesseract
+tesseract-data-eng
+tesseract-data-rus
 wl-clipboard
 ddcutil
 util-linux
