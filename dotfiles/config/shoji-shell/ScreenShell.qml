@@ -125,6 +125,7 @@ Scope {
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
         mask: Region {
             item: workspacePill
+            Region { item: voiceButton.visible ? voiceButton : null }
             Region { item: clockPill }
             Region { item: rightPills }
         }
@@ -160,6 +161,32 @@ Scope {
                     }
                 }
             }
+        }
+        ActionButton {
+            id: voiceButton
+            visible: Settings.enabled("voice")
+            anchors.left: workspacePill.right
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            height: 34
+            topPadding: 5; bottomPadding: 5
+            hint: "Home Assistant: " + VoiceSystem.label(VoiceSystem.item("ha").state)
+            highlighted: screenShell.panelOpen && screenShell.shell.panelPage === "voice"
+            contentItem: RowLayout {
+                spacing: 9
+                UiText {
+                    text: "Home Assistant"
+                    font.pixelSize: 14; font.weight: Font.DemiBold
+                    color: voiceButton.highlighted ? Theme.surface : Theme.ink
+                }
+            }
+            background: Rectangle {
+                radius: 17
+                color: voiceButton.highlighted ? Theme.accent : voiceButton.hovered ? Theme.hover : Theme.surface
+                border.width: voiceButton.visualFocus ? 2 : 0
+                border.color: Theme.accent
+            }
+            onClicked: { screenShell.shell.toggle(screenShell.output.name, "voice"); VoiceSystem.refresh(); }
         }
         Rectangle {
             id: clockPill
@@ -345,7 +372,7 @@ Scope {
             value: screenShell.panelOpen && !popup.dismissed && popup.backingWindowVisible && popup.reveal === 1
         }
         anchor.window: bar
-        anchor.rect.x: bar.width - width - 16
+        anchor.rect.x: displayedPage === "voice" ? Math.max(16, Math.min(voiceButton.x, bar.width - width - 16)) : bar.width - width - 16
         anchor.rect.y: 62
         grabFocus: true
         implicitWidth: 408
@@ -429,8 +456,9 @@ Scope {
                             Layout.fillWidth: true
                             PanelIcon { name: "bell"; tint: Theme.accent; visible: popup.displayedPage === "notifications"; Layout.rightMargin: 4 }
                             UiText {
-                                text: popup.displayedPage === "controls" ? "Системная панель" : "Уведомления"
-                                font.pixelSize: 15; font.weight: Font.Medium; Layout.fillWidth: true
+                                text: popup.displayedPage === "controls" ? "Системная панель"
+                                    : popup.displayedPage === "voice" ? "Home Assistant" : "Уведомления"
+                                font.pixelSize: popup.displayedPage === "voice" ? 20 : 15; font.weight: Font.Medium; Layout.fillWidth: true
                             }
                             ActionButton {
                                 visible: popup.displayedPage === "controls"
@@ -439,6 +467,11 @@ Scope {
                                 onClicked: { screenShell.shell.panelPage = ""; SystemSettings.open("displays", screenShell.output.name); }
                             }
                             ActionButton { icon.source: Qt.resolvedUrl("icons/close.svg"); hint: "Закрыть"; implicitWidth: 32; padding: 7; onClicked: screenShell.shell.panelPage = "" }
+                        }
+                        VoiceWidget {
+                            Layout.fillWidth: true
+                            visible: popup.displayedPage === "voice"
+                            active: screenShell.shell.panelReady && popup.displayedPage === "voice"
                         }
                         ControlCentre {
                             id: controlCentre

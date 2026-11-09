@@ -1,0 +1,336 @@
+diff --git a/src/services/notifications/org.freedesktop.Notifications.xml b/src/services/notifications/org.freedesktop.Notifications.xml
+index 3d99db0..193068d 100644
+--- a/src/services/notifications/org.freedesktop.Notifications.xml
++++ b/src/services/notifications/org.freedesktop.Notifications.xml
+@@ -1,5 +1,9 @@
+ <node>
+ 	<interface name="org.freedesktop.Notifications">
++		<property name="Inhibited" type="b" access="read">
++			<annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
++		</property>
++
+ 		<method name="GetCapabilities">
+ 			<arg name="capabilities" type="as" direction="out"/>
+ 		</method>
+diff --git a/src/services/notifications/qml.cpp b/src/services/notifications/qml.cpp
+index 42bb23a..a98c47c 100644
+--- a/src/services/notifications/qml.cpp
++++ b/src/services/notifications/qml.cpp
+@@ -15,6 +15,8 @@ namespace qs::service::notifications {
+ void NotificationServerQml::onPostReload() {
+ 	auto* instance = NotificationServer::instance();
+ 	instance->support = this->support;
++	instance->setAllowedApplications(this->mAllowedApplications);
++	instance->setInhibited(this->mInhibited);
+ 
+ 	QObject::connect(
+ 	    instance,
+@@ -31,6 +33,26 @@ void NotificationServerQml::onPostReload() {
+ 
+ bool NotificationServerQml::keepOnReload() const { return this->mKeepOnReload; }
+ 
++bool NotificationServerQml::inhibited() const { return this->mInhibited; }
++
++QStringList NotificationServerQml::allowedApplications() const {
++	return this->mAllowedApplications;
++}
++
++void NotificationServerQml::setAllowedApplications(const QStringList& applications) {
++	if (applications == this->mAllowedApplications) return;
++	this->mAllowedApplications = applications;
++	if (this->live) NotificationServer::instance()->setAllowedApplications(applications);
++	emit this->allowedApplicationsChanged();
++}
++
++void NotificationServerQml::setInhibited(bool inhibited) {
++	if (inhibited == this->mInhibited) return;
++	this->mInhibited = inhibited;
++	if (this->live) NotificationServer::instance()->setInhibited(inhibited);
++	emit this->inhibitedChanged();
++}
++
+ void NotificationServerQml::setKeepOnReload(bool keepOnReload) {
+ 	if (keepOnReload == this->mKeepOnReload) return;
+ 
+diff --git a/src/services/notifications/qml.hpp b/src/services/notifications/qml.hpp
+index 88132c7..b9680e6 100644
+--- a/src/services/notifications/qml.hpp
++++ b/src/services/notifications/qml.hpp
+@@ -29,6 +29,11 @@ class NotificationServerQml: public PostReloadHook {
+ 	/// The @@Notification.lastGeneration flag will be
+ 	/// set on notifications from the prior generation for further filtering/handling.
+ 	Q_PROPERTY(bool keepOnReload READ keepOnReload WRITE setKeepOnReload NOTIFY keepOnReloadChanged);
++	/// Report Do Not Disturb to notification clients so they can suppress their own sounds.
++	/// Inhibited notifications are closed without entering the tracked history.
++	Q_PROPERTY(bool inhibited READ inhibited WRITE setInhibited NOTIFY inhibitedChanged);
++	/// Desktop ids and explicit aliases allowed while inhibited. No urgency bypass is implicit.
++	Q_PROPERTY(QStringList allowedApplications READ allowedApplications WRITE setAllowedApplications NOTIFY allowedApplicationsChanged);
+ 	/// If the notification server should advertise that it can persist notifications in the background
+ 	/// after going offscreen. Defaults to false.
+ 	Q_PROPERTY(bool persistenceSupported READ persistenceSupported WRITE setPersistenceSupported NOTIFY persistenceSupportedChanged);
+@@ -81,6 +86,11 @@ public:
+ 	[[nodiscard]] bool keepOnReload() const;
+ 	void setKeepOnReload(bool keepOnReload);
+ 
++	[[nodiscard]] bool inhibited() const;
++	void setInhibited(bool inhibited);
++	[[nodiscard]] QStringList allowedApplications() const;
++	void setAllowedApplications(const QStringList& applications);
++
+ 	[[nodiscard]] bool persistenceSupported() const;
+ 	void setPersistenceSupported(bool persistenceSupported);
+ 
+@@ -120,6 +130,8 @@ signals:
+ 	void notification(qs::service::notifications::Notification* notification);
+ 
+ 	void keepOnReloadChanged();
++	void inhibitedChanged();
++	void allowedApplicationsChanged();
+ 	void persistenceSupportedChanged();
+ 	void bodySupportedChanged();
+ 	void bodyMarkupSupportedChanged();
+@@ -137,6 +149,8 @@ private:
+ 
+ 	bool live = false;
+ 	bool mKeepOnReload = true;
++	bool mInhibited = false;
++	QStringList mAllowedApplications;
+ 	NotificationServerSupport support;
+ };
+ 
+diff --git a/src/services/notifications/server.cpp b/src/services/notifications/server.cpp
+index 1919012..058c00a 100644
+--- a/src/services/notifications/server.cpp
++++ b/src/services/notifications/server.cpp
+@@ -4,15 +4,20 @@
+ #include <qcontainerfwd.h>
+ #include <qcoreapplication.h>
+ #include <qdbusconnection.h>
++#include <qdbusconnectioninterface.h>
++#include <qdbusmessage.h>
+ #include <qdbusmetatype.h>
++#include <qdbusreply.h>
+ #include <qdbusservicewatcher.h>
+ #include <qlogging.h>
+ #include <qloggingcategory.h>
++#include <qfileinfo.h>
+ #include <qnamespace.h>
+ #include <qobjectdefs.h>
+ #include <qqmlengine.h>
+ #include <qtmetamacros.h>
+ #include <qtypes.h>
++#include <qvariant.h>
+ 
+ #include "../../core/logcat.hpp"
+ #include "../../core/model.hpp"
+@@ -22,6 +27,12 @@
+ 
+ namespace qs::service::notifications {
+ 
++static QString applicationKey(const QString& value) {
++	auto key = value.trimmed().toCaseFolded();
++	if (key.endsWith(".desktop")) key.chop(8);
++	return key;
++}
++
+ // NOLINTNEXTLINE(misc-use-internal-linkage)
+ QS_LOGGING_CATEGORY(logNotifications, "quickshell.service.notifications", QtWarningMsg);
+ 
+@@ -55,6 +66,13 @@ NotificationServer::NotificationServer() {
+ 	this->serviceWatcher.setWatchMode(QDBusServiceWatcher::WatchForUnregistration);
+ 	this->serviceWatcher.addWatchedService("org.freedesktop.Notifications");
+ 	this->serviceWatcher.setConnection(bus);
++	this->clientWatcher.setConnection(bus);
++	this->clientWatcher.setWatchMode(QDBusServiceWatcher::WatchForUnregistration);
++	QObject::connect(&this->clientWatcher, &QDBusServiceWatcher::serviceUnregistered,
++	                 this, [this](const QString& service) {
++		this->clientApplications.remove(service);
++		this->clientWatcher.removeWatchedService(service);
++	});
+ 
+ 	NotificationServer::tryRegister();
+ }
+@@ -97,6 +115,95 @@ ObjectModel<Notification>* NotificationServer::trackedNotifications() {
+ 	return &this->mNotifications;
+ }
+ 
++bool NotificationServer::inhibited() {
++	// Qt installs the caller context for Properties.Get/GetAll on the exported parent.
++	return this->calledFromDBus() ? this->clientInhibited(this->message().service())
++	                              : this->mInhibited;
++}
++
++QStringList NotificationServer::allowedApplications() const {
++	return this->mAllowedApplications;
++}
++
++void NotificationServer::setAllowedApplications(const QStringList& applications) {
++	if (applications.size() > 1024) return;
++	auto normalized = QStringList();
++	for (const auto& application: applications) {
++		if (application.size() > 256 || application.contains(QChar::Null)) return;
++		auto key = applicationKey(application);
++		if (!key.isEmpty() && !normalized.contains(key)) normalized.append(key);
++	}
++	normalized.sort();
++	if (normalized == this->mAllowedApplications) return;
++	this->mAllowedApplications = normalized;
++	this->discardBlocked();
++	this->publishInhibition();
++}
++
++bool NotificationServer::applicationAllowed(const QString& desktopEntry, const QString& appName) const {
++	// A supplied desktop id takes priority over the unstructured display name.
++	return this->mAllowedApplications.contains(applicationKey(
++	    desktopEntry.isEmpty() ? appName : desktopEntry
++	));
++}
++
++bool NotificationServer::clientInhibited(const QString& service) {
++	if (!this->clientApplications.contains(service)) {
++		if (this->clientApplications.size() >= 1024) return this->mInhibited;
++		auto identities = QStringList();
++		auto* interface = QDBusConnection::sessionBus().interface();
++		if (interface) {
++			const auto pid = interface->servicePid(service);
++			if (pid.isValid()) {
++				const auto executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid.value())).symLinkTarget();
++				if (!executable.isEmpty()) identities.append(applicationKey(QFileInfo(executable).fileName()));
++			}
++		}
++		this->clientApplications.insert(service, identities);
++		this->clientWatcher.addWatchedService(service);
++	}
++	if (!this->mInhibited) return false;
++	for (const auto& identity: this->clientApplications.value(service)) {
++		if (this->mAllowedApplications.contains(identity)) return false;
++	}
++	return true;
++}
++
++void NotificationServer::discardBlocked() {
++	if (!this->mInhibited) return;
++	const auto ids = this->idMap.keys();
++	for (auto id: ids) {
++		auto* notification = this->idMap.value(id);
++		if (!notification) continue;
++		if (!this->applicationAllowed(notification->bindableDesktopEntry().value(),
++		                              notification->bindableAppName().value())) {
++			this->deleteNotification(notification, NotificationCloseReason::Expired);
++		}
++	}
++}
++
++void NotificationServer::setInhibited(bool inhibited) {
++	if (inhibited == this->mInhibited) return;
++	this->mInhibited = inhibited;
++	emit this->inhibitedChanged();
++	this->discardBlocked();
++	this->publishInhibition();
++}
++
++void NotificationServer::publishInhibition() {
++	// A global true/false broadcast would overwrite the exceptions in clients' caches.
++	for (const auto& service: this->clientApplications.keys()) {
++		auto message = QDBusMessage::createTargetedSignal(
++		    service, "/org/freedesktop/Notifications", "org.freedesktop.DBus.Properties", "PropertiesChanged"
++		);
++		message.setArguments({QStringLiteral("org.freedesktop.Notifications"),
++		                      QVariantMap {{QStringLiteral("Inhibited"), this->clientInhibited(service)}},
++		                      QStringList {}});
++		if (!QDBusConnection::sessionBus().send(message))
++			qCWarning(logNotifications) << "Could not publish notification inhibition change.";
++	}
++}
++
+ void NotificationServer::deleteNotification(
+     Notification* notification,
+     NotificationCloseReason::Enum reason
+@@ -143,6 +250,7 @@ void NotificationServer::CloseNotification(uint id) {
+ 
+ QStringList NotificationServer::GetCapabilities() const {
+ 	auto capabilities = QStringList();
++	capabilities += "inhibitions";
+ 
+ 	if (this->support.persistence) capabilities += "persistence";
+ 
+@@ -185,6 +293,19 @@ uint NotificationServer::Notify(
+     int expireTimeout
+ ) {
+ 	auto* notification = replacesId == 0 ? nullptr : this->idMap.value(replacesId);
++	const auto desktopEntry = hints.value("desktop-entry").toString();
++	if (this->mInhibited && !this->applicationAllowed(desktopEntry, appName)) {
++		if (notification) {
++			const auto id = notification->id();
++			this->deleteNotification(notification, NotificationCloseReason::Expired);
++			return id;
++		}
++		const auto id = this->nextId++;
++		QMetaObject::invokeMethod(this, [this, id]() {
++			emit this->NotificationClosed(id, NotificationCloseReason::Expired);
++		}, Qt::QueuedConnection);
++		return id;
++	}
+ 	auto old = notification != nullptr;
+ 
+ 	if (!notification) {
+diff --git a/src/services/notifications/server.hpp b/src/services/notifications/server.hpp
+index 8bd92a3..2705fc7 100644
+--- a/src/services/notifications/server.hpp
++++ b/src/services/notifications/server.hpp
+@@ -3,6 +3,7 @@
+ #include <functional>
+ 
+ #include <qcontainerfwd.h>
++#include <qdbuscontext.h>
+ #include <qdbusservicewatcher.h>
+ #include <qhash.h>
+ #include <qobject.h>
+@@ -27,14 +28,19 @@ struct NotificationServerSupport {
+ 	QVector<QString> extraHints;
+ };
+ 
+-class NotificationServer: public QObject {
++class NotificationServer: public QObject, public QDBusContext {
+ 	Q_OBJECT;
++	Q_PROPERTY(bool Inhibited READ inhibited NOTIFY inhibitedChanged);
+ 
+ public:
+ 	static NotificationServer* instance();
+ 
+ 	void switchGeneration(bool reEmit, const std::function<void()>& clearHook);
+ 	ObjectModel<Notification>* trackedNotifications();
++	[[nodiscard]] bool inhibited();
++	void setInhibited(bool inhibited);
++	[[nodiscard]] QStringList allowedApplications() const;
++	void setAllowedApplications(const QStringList& applications);
+ 	void deleteNotification(Notification* notification, NotificationCloseReason::Enum reason);
+ 
+ 	// NOLINTBEGIN
+@@ -57,6 +63,7 @@ public:
+ 
+ signals:
+ 	void notification(Notification* notification);
++	void inhibitedChanged();
+ 
+ 	// NOLINTBEGIN
+ 	void NotificationClosed(quint32 id, quint32 reason);
+@@ -69,10 +76,18 @@ private slots:
+ 
+ private:
+ 	explicit NotificationServer();
++	[[nodiscard]] bool applicationAllowed(const QString& desktopEntry, const QString& appName) const;
++	[[nodiscard]] bool clientInhibited(const QString& service);
++	void publishInhibition();
++	void discardBlocked();
+ 
+ 	static void tryRegister();
+ 
+ 	QDBusServiceWatcher serviceWatcher;
++	bool mInhibited = false;
++	QStringList mAllowedApplications;
++	QDBusServiceWatcher clientWatcher;
++	QHash<QString, QStringList> clientApplications;
+ 	quint32 nextId = 1;
+ 	QHash<quint32, Notification*> idMap;
+ 	ObjectModel<Notification> mNotifications {this};

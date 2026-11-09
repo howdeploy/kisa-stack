@@ -7,6 +7,7 @@ third-party material. Modified upstream code retains its upstream terms.
 | Material | Source and terms |
 | --- | --- |
 | ShojiWM configuration/API ancestry | [bea4dev/ShojiWM](https://github.com/bea4dev/ShojiWM), MIT; license in `licenses/ShojiWM-MIT` |
+| Quickshell notification policy patch | [quickshell-mirror/quickshell](https://github.com/quickshell-mirror/quickshell) at `sources.json` revision; upstream LGPL-3.0, retained in `licenses/Quickshell-LGPL-3.0` with GPL-3.0 text in `licenses/Walker-GPL-3.0`. Full corresponding source is retained by the build recipe. |
 | Walker patch and bundled base CSS | [abenz1267/walker](https://github.com/abenz1267/walker) at `sources.json` revision; GPL-3.0, full license in `licenses/Walker-GPL-3.0` |
 | Dock/Media QML ancestry | [bea4dev/shoji-bar-3](https://github.com/bea4dev/shoji-bar-3/tree/1f9ca9309e6dbdec0a785bd6a86926a6406b4171); adapted `Dock.qml` and `Media.qml`. `Lock.qml` also credits that project; its exact source revision was not recorded. No standalone upstream LICENSE was found during packaging; no new license grant for the upstream portions is asserted here. |
 | Native control geometry and motion | SL UI Library 1.2.1 by SLtowl, MIT; component IDs in `config/shoji-shell/SL-UI-SOURCES.md`, license in `config/shoji-shell/LICENSE-SL-UI` |

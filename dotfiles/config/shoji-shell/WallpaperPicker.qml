@@ -28,9 +28,9 @@ FocusScope {
     readonly property string selectedWallpaper: !animatedMode && carousel.currentIndex >= 0 && carousel.currentIndex < carousel.count
         ? Wallpapers.library.get(carousel.currentIndex, "fileUrl").toString() : ""
     readonly property var widgetLabels: ({ limits: "Лимиты AI", sessions: "Сессии", neko: "Котик",
-        github: "GitHub", hermes: "Hermes", vast: "Vast.ai", music: "Музыка", profile: "Профиль", home: "Home Zone", "gaming-home": "Home Zone · Gaming" })
+        github: "GitHub", hermes: "Hermes", vast: "Vast.ai", music: "Музыка", profile: "Профиль", voice: "Home Assistant", home: "Home Zone", "gaming-home": "Home Zone · Gaming" })
     readonly property var widgetIcons: ({ limits: "session-codex", sessions: "keyboard", github: "git-pull-request",
-        hermes: "message-circle", vast: "cloud", music: "headphones", profile: "profile" })
+        hermes: "message-circle", vast: "cloud", music: "headphones", profile: "profile", voice: "headphones" })
     readonly property int activeRow: Wallpapers.pickerRow
     property string chosenWallpaper: ""
     property string chosenStill: ""
@@ -535,10 +535,12 @@ FocusScope {
                                                  0, 0, 0, 1)
                         }
                         WallpaperImage {
+                            thumbnail: true
                             anchors.fill: parent
                             outputRect: Qt.vector4d(monitor.modelData.x, monitor.modelData.y, monitor.modelData.width, monitor.modelData.height)
                             framing: monitor.previewFrame
-                            source: monitor.wallpaper === Wallpapers.neutral ? monitor.wallpaper : Wallpapers.thumbnails[monitor.wallpaper] || ""
+                            source: monitor.wallpaper === Wallpapers.neutral || Wallpapers.thumbnailErrors[monitor.wallpaper]
+                                ? Wallpapers.neutral : Wallpapers.thumbnails[monitor.wallpaper] || ""
                         }
                         Rectangle {
                             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -557,7 +559,7 @@ FocusScope {
                                 readonly property var targetOutput: WidgetLayouts.screenFor(entry.output)
                                 readonly property string outputName: targetOutput ? targetOutput.name : ""
                                 visible: outputName === monitor.modelData.name
-                                width: (modelData === "gaming-home" ? 1468 * gamingScale : modelData === "home" ? 852 * homeScale : modelData === "neko" ? 210 : modelData === "hermes" ? 480 : ["github", "sessions", "profile"].includes(modelData) ? 340 : 286) * monitor.ratio
+                                width: (modelData === "gaming-home" ? 1468 * gamingScale : modelData === "home" ? 852 * homeScale : modelData === "neko" ? 210 : modelData === "hermes" ? 480 : ["github", "sessions", "profile", "voice"].includes(modelData) ? 340 : 286) * monitor.ratio
                                 height: (modelData === "gaming-home" ? 420 * gamingScale : modelData === "home" ? 690 * homeScale : modelData === "neko" ? 210 : modelData === "hermes" ? 60 : modelData === "music" ? 120 : modelData === "github" ? 460 : modelData === "sessions" ? 350 : modelData === "profile" ? Math.min(410, Math.max(0, monitor.modelData.height - 688)) : 270) * monitor.ratio
                                 x: WidgetLayouts.horizontalPosition(entry, monitor.modelData.width, width / monitor.ratio) * monitor.ratio
                                 y: (modelData === "profile"

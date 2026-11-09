@@ -28,6 +28,7 @@ clone "$(pin repository)" "$work/engine" "$(pin revision)"
 git -C "$work/engine" submodule update --init --recursive
 git -C "$work/engine" apply "$root/patches/wallpaper-engine/existing-crop-upscale.patch"
 git -C "$work/engine" apply "$root/patches/wallpaper-engine/engine-media-memory.patch"
+git -C "$work/engine" apply "$root/patches/wallpaper-engine/fullscreen-output-pause.patch"
 export PKG_CONFIG_PATH="$work/mpv-install/lib/pkgconfig:$PKG_CONFIG_PATH"
 cmake -S "$work/engine" -B "$work/engine/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
     -DMPV_LIBRARY_mpv="$work/mpv-install/lib/libmpv.so" -DMPV_INCLUDE_DIR="$work/mpv-install/include"

@@ -5,8 +5,15 @@ rustup
 base-devel
 clang
 cmake
+ninja
+cli11
+spirv-tools
+jemalloc
 pkgconf
 wayland
+wayland-protocols
+libdrm
+vulkan-headers
 libxkbcommon
 systemd-libs
 libinput

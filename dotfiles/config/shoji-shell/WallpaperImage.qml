@@ -10,7 +10,10 @@ Item {
     property vector4d outputRect: Qt.vector4d(0, 0, width, height)
     property real pixelRatio: 1
     property bool capture: false
+    property bool thumbnail: false
+    property url thumbnailSource: ""
     readonly property int status: !source.toString() ? Image.Null
+        : thumbnail ? image.status
         : metadataError ? Image.Error : metadataSource !== source.toString() ? Image.Loading : image.status
     property string metadataSource: ""
     property bool metadataError: false
@@ -20,6 +23,7 @@ Item {
         : ({ x: outputRect.x, y: outputRect.y, width: outputRect.z, height: outputRect.w })
     readonly property var texture: textureLoader.item
     function readMetadata() {
+        if (thumbnail) return;
         const url = source.toString();
         if (metadataWorker.running || metadataSource === url) return;
         if (!url || /\.svg(?:[?#].*)?$/i.test(url)) {
@@ -34,13 +38,21 @@ Item {
         metadataWorker.running = true;
     }
     onSourceChanged: {
+        if (thumbnail) {
+            // A missing cache entry is pending; keep the previous miniature.
+            if (source.toString()) thumbnailSource = source;
+            return;
+        }
         metadataSource = "";
         metadataError = false;
         originalSize = Qt.size(0, 0);
         if (metadataWorker.running) metadataWorker.running = false;
         Qt.callLater(readMetadata);
     }
-    Component.onCompleted: readMetadata()
+    Component.onCompleted: {
+        if (thumbnail) thumbnailSource = source;
+        else readMetadata();
+    }
     Process {
         id: metadataWorker
         property string requestSource: ""
@@ -75,14 +87,16 @@ Item {
             readonly property real ratio: root.width / Math.max(1, root.outputRect.z)
             readonly property real zoom: Math.max(root.geometry.width / Math.max(1, implicitWidth),
                 root.geometry.height / Math.max(1, implicitHeight)) * root.crop.zoom * ratio
-            source: root.metadataSource === root.source.toString() && !root.metadataError ? root.source : ""
+            source: root.thumbnail ? root.thumbnailSource
+                : root.metadataSource === root.source.toString() && !root.metadataError ? root.source : ""
             asynchronous: true
+            retainWhileLoading: root.thumbnail
             cache: false
             mipmap: true
             readonly property real decodeScale: root.originalSize.width > 0
                 ? Math.min(1, Math.max(root.geometry.width / root.originalSize.width,
                     root.geometry.height / root.originalSize.height) * root.crop.zoom * ratio * root.pixelRatio) : 1
-            sourceSize: root.originalSize.width > 0
+            sourceSize: root.thumbnail ? Qt.size(900, 600) : root.originalSize.width > 0
                 ? Qt.size(Math.max(1, Math.ceil(root.originalSize.width * decodeScale)),
                     Math.max(1, Math.ceil(root.originalSize.height * decodeScale))) : Qt.size(-1, -1)
             width: implicitWidth * zoom

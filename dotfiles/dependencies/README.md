@@ -28,14 +28,15 @@ from the reference inventory onto different hardware.
 | Component | How it is supplied |
 | --- | --- |
 | ShojiWM | Exact public fork revision in `sources.json`, built by `build-shojiwm.sh` |
-| Quickshell, Ghostty, Dolphin, audio/network/Bluetooth controls | `arch.txt` |
+| Quickshell | Pinned 0.3.1 source plus the notification policy patch, built by `build-quickshell.sh`; build prerequisites in `arch.txt` |
+| Ghostty, Dolphin, audio/network/Bluetooth controls | `arch.txt` |
 | Walker | Exact source plus theme patch, built by `build-walker.sh` |
 | Elephant | Install `elephant-bin`, `elephant-desktopapplications-bin`, `elephant-files-bin`, `elephant-providerlist-bin`; the reference versions are recorded |
 | Animated wallpaper renderer | Private pinned engine, CEF runtime and mpv, built by `build-wallpaper-engine.sh`; no system engine package is required for this path |
 | Steam and Wallpaper Engine content | Install Steam for your distribution and supply your own Wallpaper Engine assets and Workshop subscriptions |
 | MateEngine | Pinned Mate Engine Plus source includes the lock/voice bridge; see [MateEngine setup](../docs/mateengine.md). Unity and owned Steam inputs are separate |
 | Brave, Steam, Happ, Codex Desktop | Optional applications; not required by the shell. Reference pacman entries cover some of them; Codex Desktop and manual app installations are not represented by pacman |
-| GitHub, Vast, limits, sessions, Hermes, weather | Optional [integrations](../docs/widgets.md); install the chosen CLI/runtime and authenticate locally |
+| GitHub, Vast, limits, sessions, Hermes, weather, voice | Optional [integrations](../docs/widgets.md); install the chosen CLI/runtime and authenticate locally. Voice requires the user's own compatible local router. |
 
 The default dock pins only Ghostty and Dolphin. Pins whose desktop entry is
 absent are hidden; edit `Dock.qml` to add your own installed desktop-entry IDs.

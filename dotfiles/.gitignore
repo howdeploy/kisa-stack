@@ -1,6 +1,7 @@
 integrations.env
 wallpapers.json
 system-settings.json
+notification-policy.json
 *.local.*
 *.qsb
 *.pyc

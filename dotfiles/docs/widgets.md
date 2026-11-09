@@ -32,6 +32,7 @@ does not install Codex/Grok/Kimi, Vast or Hermes. See the
 | `SHOJI_ENABLE_SESSIONS=1` | Your local Codex/Kimi/Grok session stores; reads titles and working-directory metadata. Clicking a session copies its resume command using `wl-copy`; it does not run it. Widget archiving writes its own local SQLite index. |
 | `SHOJI_ENABLE_HERMES=1` | A compatible Hermes checkout/venv with `tui_gateway.entry`; starts only when you submit a message. It is a real agent with your configured tools, permissions and model costs. |
 | `SHOJI_ENABLE_WEATHER=1` | `SHOJI_WEATHER_CITIES` with exactly two `[id,name,latitude,longitude]` entries. Sends those coordinates to Open-Meteo; no API key is required. |
+| `SHOJI_ENABLE_VOICE=1` | Your local voice-router IPC; reads service health/recent chat titles and changes dictation mode or the selected chat only after your click. Does not start a voice engine or send an agent prompt. See [voice setup and protocol](voice.md). |
 
 Hermes uses `${HOME}/.hermes/hermes-agent` by default; override `SHOJI_HERMES_ROOT`.
 Its adapter expects JSON-RPC methods such as `session.create`, `prompt.submit`,

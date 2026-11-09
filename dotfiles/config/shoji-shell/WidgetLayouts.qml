@@ -19,6 +19,9 @@ Singleton {
         { id: "gaming-home-zone", name: "Home Zone · Gaming", widgets: {
             "gaming-home": { output: "right", horizontal: "center", vertical: "center", x: 0, y: 0 }
         } },
+        { id: "voice-input", name: "Ввод и голос", widgets: {
+            voice: { output: "primary", horizontal: "left", vertical: "bottom", x: 16, y: 16 }
+        } },
         { id: "default", name: "Текущая раскладка", widgets: {
             limits: { output: "primary", horizontal: "left", vertical: "top", x: 16, y: 68 },
             sessions: { output: "primary", horizontal: "left", vertical: "center", x: 16, y: 0 },

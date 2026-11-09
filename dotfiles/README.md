@@ -39,6 +39,12 @@ size restoration, fullscreen/focus repairs, a 700 ms close reflow and a frozen-f
 screenshot picker with window capture and OCR. The publication retains portable
 paths and the existing integration opt-in gates.
 
+The follow-up also publishes the optional voice/chat selector, persistent notification
+exceptions, retained wallpaper thumbnails and output-aware fullscreen autopause.
+Read [notification setup](docs/notifications.md) before upgrading: the shell now
+requires the pinned, patched Quickshell built by `scripts/build-quickshell.sh`.
+The [voice widget](docs/voice.md) is opt-in and connects to your own local router.
+
 The [November 3 update](docs/update-2026-11-03.md) publishes the prepared desktop
 refactor, matching compositor fixes, mouse side-button screenshot shortcut and
 the additional NVDEC memory patch. It preserves the portable paths and integration

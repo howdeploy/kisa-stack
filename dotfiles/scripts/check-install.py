@@ -16,6 +16,10 @@ def main():
         args = [sys.executable, str(ROOT / "scripts/install.py"), "--target-home", str(home)]
         subprocess.run(args, check=True, capture_output=True)
         assert not list(home.iterdir()), "Preview wrote files"
+        shell_binary = home / ".local/share/shoji-shell/quickshell/bin/quickshell"
+        shell_binary.parent.mkdir(parents=True)
+        shell_binary.write_text("#!/bin/sh\nexit 0\n")
+        shell_binary.chmod(0o755)  # Fixture is checked for existence, never executed.
         subprocess.run([*args, "--apply"], check=True, capture_output=True)
         config = home / ".config"
         assert config.joinpath("shojiwm/node_modules/shoji_wm").is_symlink()
@@ -23,10 +27,14 @@ def main():
         assert str(home) in config.joinpath("elephant/files.toml").read_text()
         local = config / "shoji-shell/integrations.env"
         local.write_text("SHOJI_ENABLE_GITHUB=0\n# local setting\n")
+        policy = config / "shoji-shell/notification-policy.json"
+        policy.write_text('{"version":1,"quiet":true,"exceptions":["example.desktop"]}\n')
         user_file = config / "ghostty/user-note"
         user_file.write_text("preserve in backup\n")
         subprocess.run([*args, "--apply"], check=True, capture_output=True)
         assert "local setting" in local.read_text()
+        assert json.loads(policy.read_text())["quiet"] is True
+        assert json.loads(policy.read_text())["exceptions"] == ["example.desktop"]
         manifests = list(home.glob(".local/state/kisa-dotfiles/backups/*/manifest.json"))
         assert len(manifests) == 2
         backed_up = [Path(e["backup"]) for m in manifests for e in json.loads(m.read_text()) if e["backup"]]

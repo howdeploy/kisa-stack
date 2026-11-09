@@ -415,12 +415,48 @@ FocusScope {
             Group {
                 heading: "Режим уведомлений"
                 SettingsRow {
-                    label: "Не беспокоить"
-                    description: "До перезапуска оболочки · история продолжает пополняться"
-                    SettingsToggle { hint: "Не беспокоить"; selected: Notifications.quiet; onRequested: selected => Notifications.quiet = selected }
+                    label: "Получать уведомления"
+                    description: "При выключении — без новых сообщений, звуков и записей в истории. Исключения выбираются ниже."
+                    SettingsToggle { hint: "Получать уведомления"; selected: !Notifications.quiet; enabled: Notifications.loaded; onRequested: selected => Notifications.setQuiet(!selected) }
                 }
+                UiText { visible: Notifications.error !== ""; text: Notifications.error; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 11 }
+                UiText { visible: !Notifications.compositorReady; text: "Политика ShojiWM не подтверждена. Блокировка отдельных окон уведомлений недоступна."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 11 }
+                UiText { text: "Собственные сообщения и звуки внутри приложений могут требовать отдельной настройки."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 11 }
                 SettingsRow { label: "В истории"; UiText { text: Notifications.count + " / " + Notifications.historyLimit; color: Theme.muted; font.pixelSize: 12 } }
                 SettingsActionButton { text: "Очистить историю"; enabled: Notifications.count > 0; onClicked: Notifications.clearAll() }
+            }
+            Group {
+                heading: "Исключения"
+                UiText { text: "Эти приложения могут уведомлять даже при выключенном общем переключателе. Критические сообщения сами по себе не являются исключением."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 11 }
+                SettingsField { id: appSearch; Layout.fillWidth: true; placeholderText: "Найти приложение"; Accessible.name: "Поиск исключений уведомлений" }
+                ListView {
+                    id: exceptionList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(360, contentHeight)
+                    clip: true
+                    spacing: 6
+                    model: Notifications.applications.filter(entry => {
+                        const needle = appSearch.text.trim().toLowerCase();
+                        return !needle || (entry.name + " " + entry.id).toLowerCase().includes(needle);
+                    })
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: RowLayout {
+                        id: exceptionRow
+                        required property var modelData
+                        width: exceptionList.width
+                        height: 58
+                        spacing: 12
+                        Image { source: Quickshell.iconPath(exceptionRow.modelData.icon || "application-x-executable", true); sourceSize.width: 24; sourceSize.height: 24; Layout.preferredWidth: 24; Layout.preferredHeight: 24; fillMode: Image.PreserveAspectFit }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            UiText { text: exceptionRow.modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 13 }
+                            UiText { text: exceptionRow.modelData.id; Layout.fillWidth: true; elide: Text.ElideRight; color: Theme.muted; font.pixelSize: 10 }
+                        }
+                        SettingsToggle { hint: "Разрешить уведомления: " + exceptionRow.modelData.name; selected: Notifications.isException(exceptionRow.modelData.id); enabled: Notifications.loaded; onRequested: selected => Notifications.setException(exceptionRow.modelData.id, selected) }
+                    }
+                }
+                UiText { visible: exceptionList.count === 0; text: "Приложения не найдены"; color: Theme.muted; font.pixelSize: 12 }
             }
         }
     }

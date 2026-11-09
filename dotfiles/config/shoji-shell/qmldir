@@ -1,5 +1,11 @@
 singleton Theme 1.0 Theme.qml
 singleton Settings 1.0 Settings.qml
+singleton VoiceSystem 1.0 VoiceSystem.qml
+VoiceWidget 1.0 VoiceWidget.qml
+VoiceDesktopWidget 1.0 VoiceDesktopWidget.qml
+VoiceInputModes 1.0 VoiceInputModes.qml
+HomeServiceList 1.0 HomeServiceList.qml
+HomeStatusIcon 1.0 HomeStatusIcon.qml
 SettingsActionButton 1.0 SettingsActionButton.qml
 WallpaperSettings 1.0 WallpaperSettings.qml
 DesktopWallpaperSettings 1.0 DesktopWallpaperSettings.qml

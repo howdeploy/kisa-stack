@@ -29,6 +29,7 @@ import type { CompositionRenderable, ManagedWindowRect } from "shoji_wm/types";
 import { createIpcServer } from "shoji_wm/ipc";
 import { registerSystemSettings } from "./system-settings";
 import { registerLockSceneIpc } from "./lock-scene";
+import { registerNotificationPolicy } from "./notification-policy";
 import {
   HybridWindowManager,
   isMateEngineWindow,
@@ -159,6 +160,7 @@ COMPOSITOR.onEnable((event) => {
 //   dock.proximity           { monitor: string, inside: bool }    (broadcast)
 // ---------------------------------------------------------------------------
 const WORKSPACE_IPC = createIpcServer();
+const notificationsAllowed = registerNotificationPolicy(WORKSPACE_IPC);
 const OUTPUT_POWER = COMPOSITOR.output as typeof COMPOSITOR.output & {
   setPower?: (power: "on" | "off", options?: { wakeOnInput?: boolean }) => void;
 };
@@ -845,6 +847,7 @@ COMPOSITOR.event.onWindowFullscreenRequest((event) => {
 });
 
 COMPOSITOR.event.onWindowActivateRequest((event) => {
+  if (isSteamNotificationWindow(event.window) && !notificationsAllowed(event.window.appId())) return;
   HYBRID_WINDOW_MANAGER.onWindowActivateRequest(event);
   scheduleWorkspaceBroadcast();
 });
@@ -894,8 +897,9 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
 
   const zIndex = computed(() => compositorWindowZIndex(window));
   const minimizeVisualIdle = window.state[WINDOW_STATE_MINIMIZE_VISUAL_IDLE];
+  const notificationBlocked = computed(() => isSteamNotificationWindow(window) && !notificationsAllowed(window.appId()));
   const inactive = computed(
-    () => (minimizeVisualIdle() && !windowWaveIsHiding(window))
+    () => notificationBlocked() || (minimizeVisualIdle() && !windowWaveIsHiding(window))
       || (!workspaceVisible() && !tileDragging()),
   );
   const interactive = computed(
@@ -1018,7 +1022,7 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
         rect={managedRect}
         zIndex={zIndex}
         visibleOutputs={window.state[WINDOW_STATE_VISIBLE_OUTPUTS]}
-        opacity={workspaceOpacity}
+        opacity={computed(() => notificationBlocked() ? 0 : workspaceOpacity())}
         forceRectSize={false}
         tiled={false}
         idle={inactive}

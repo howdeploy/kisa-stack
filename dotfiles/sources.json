@@ -1,5 +1,11 @@
 {
-  "snapshot_date": "2026-11-03",
+  "snapshot_date": "2026-11-09",
+  "quickshell": {
+    "repository": "https://github.com/quickshell-mirror/quickshell",
+    "revision": "1a4716cde794a59928d9d9fc15f2afc7a95de360",
+    "version": "0.3.1",
+    "patch": "patches/quickshell/notification-policy.patch"
+  },
   "shojiwm": {
     "repository": "https://github.com/howdeploy/ShojiWM",
     "branch": "main",
@@ -24,7 +30,7 @@
     "revision": "b016d7d1fdcf4e5fd2f9c9fa420a8aaa07fee02d",
     "media_patch_revision": "7f94c7739b83790c384ded3c03074763495eeb3a",
     "media_pull_request": "https://github.com/Almamu/linux-wallpaperengine/pull/711",
-    "patches": ["patches/wallpaper-engine/existing-crop-upscale.patch", "patches/wallpaper-engine/engine-media-memory.patch"],
+    "patches": ["patches/wallpaper-engine/existing-crop-upscale.patch", "patches/wallpaper-engine/engine-media-memory.patch", "patches/wallpaper-engine/fullscreen-output-pause.patch"],
     "mpv_repository": "https://github.com/mpv-player/mpv",
     "mpv_revision": "41f6a645068483470267271e1d09966ca3b9f413",
     "mpv_patch": "patches/wallpaper-engine/mpv-opengl-fence.patch",

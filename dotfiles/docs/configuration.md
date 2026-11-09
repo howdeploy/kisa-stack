@@ -74,6 +74,7 @@ installed `shoji-shell/wallpapers.json`, not to the repository.
 | Empty / Без виджетов | No widgets; first in the picker and first-run default |
 | Home Zone | Animated clock mascots, calendar, local system profile and account tiles behind the existing opt-in flags |
 | Gaming Home Zone | Home dashboard and game/process telemetry on the rightmost output |
+| Voice input / Ввод и голос | Voice service indicators and dictation-mode controls, gated by `SHOJI_ENABLE_VOICE=1` |
 | Default / Текущая раскладка | Limits top-left, sessions mid-left, Vast bottom-left, GitHub top-right, Hermes top-center, music and Neko bottom-right |
 | Bottom HUD / Hermes снизу | Hermes above the dock with chats opening upward; limits bottom-right with music above; GitHub top-right; sessions bottom-left; no Vast or Neko |
 
@@ -88,6 +89,17 @@ for the empty preset. It requires two user-configured locations.
 Recognized Steam, Minecraft and OpenMW game windows initially use the leftmost
 output; edit `shojiwm/src/game-placement.ts` to change this policy or add other
 app IDs. Minecraft fullscreen reserves 80 logical pixels for the dock.
+
+## Notifications
+
+Settings → Notifications stores the common receive switch and per-application
+exceptions in local `shoji-shell/notification-policy.json`. Disabling reception
+blocks new notification cards/history; explicit exceptions still pass. The patched
+server reports caller-specific `Inhibited` for clients that respect system DND.
+In-app sounds/overlays outside that protocol retain their application settings.
+The compositor also filters known standalone Steam notification windows.
+See [the required Quickshell build](notifications.md). The policy file is ignored,
+excluded from publication and preserved by the installer.
 
 ## Lock screen
 

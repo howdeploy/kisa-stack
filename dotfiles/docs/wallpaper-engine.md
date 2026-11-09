@@ -26,6 +26,7 @@ NameOwnerChanged signals keep that registry current and revoke former owners.
 | `engine-media-memory.patch` | Actual polling intervals, resource cleanup and the asynchronous recovery path above |
 | `existing-crop-upscale.patch` | Shell crop/zoom and bounded bicubic upscaling before slicing multi-output spans |
 | `mpv-opengl-fence.patch` | Prevent undrained swapchain fences when the libmpv render API has no swap-buffers callback |
+| `fullscreen-output-pause.patch` | Ignore minimized/inactive-workspace windows and pause only when all outputs used by that renderer have a relevant fullscreen window |
 
 The mpv fix is already upstream in mpv-player/mpv#17303. It is retained here
 because the reproducible source recipe uses the earlier pinned mpv revision.
@@ -58,7 +59,7 @@ grep -v '^#' dotfiles/dependencies/arch-wallpaper.txt | xargs sudo pacman -S --n
 ```
 
 The script reads pins from `sources.json`, builds pinned codec headers into its
-work directory, builds private mpv with both patches, applies the two engine patches, and builds
+work directory, builds private mpv with both patches, applies the three engine patches, and builds
 the full engine executable and CEF resources. CEF is downloaded by upstream's
 CMake configuration. Default build parallelism is two; override it with a
 positive `CMAKE_BUILD_PARALLEL_LEVEL` if needed. Native build libraries and disk
@@ -92,6 +93,19 @@ remains a compatibility fallback. Its version and patches are outside this
 bundle; the helper records that fallback in its local log. Use the private build
 for the reference patched behavior. A partial private runtime is rejected,
 rather than silently replaced with a stock engine.
+
+## Fullscreen and workspace autopause
+
+The detector commits toplevel state at the protocol `done` event and tracks output
+membership by name. Minimized windows are excluded; ShojiWM uses that state for
+inactive workspaces as well. A multi-output panorama keeps playing while any of
+its outputs remains exposed. Closing windows and output hot-unplug remove the
+associated resources. Unknown output names or a failed display roundtrip keep
+playback running. Named-output detection requires wl_output version 4.
+
+Rebuild and reinstall the wallpaper bundle to receive this native fix; copying
+QML alone cannot update the renderer. Existing memory, media and crop patches are
+retained. No personal wallpaper assets or current selections are distributed.
 
 Install the desktop configs separately, then deliberately select your own live
 wallpaper with Super+W. A renderer failure is reported by the helper; static

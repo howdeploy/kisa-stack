@@ -18,7 +18,7 @@ ComboBox {
         verticalAlignment: Text.AlignVCenter
         leftPadding: 12
         rightPadding: 28
-        font.pixelSize: 12
+        font.pixelSize: control.font.pixelSize
         elide: Text.ElideRight
     }
     indicator: PanelIcon {
@@ -58,7 +58,7 @@ ComboBox {
         width: control.width - 8
         implicitHeight: 34
         highlighted: control.highlightedIndex === entry.index
-        contentItem: UiText { text: entry.modelData.label; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12; elide: Text.ElideRight }
+        contentItem: UiText { text: entry.modelData.label; verticalAlignment: Text.AlignVCenter; font.pixelSize: control.font.pixelSize; elide: Text.ElideRight }
         background: Rectangle {
             radius: 7
             color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, entry.highlighted ? 0.12 : 0)

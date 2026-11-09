@@ -1,5 +1,28 @@
 # Validation record
 
+## 2026-11-09 portable service follow-up
+
+The voice widget/selector, persistent notification policy, retained wallpaper
+miniatures and output-aware fullscreen autopause are now included as portable
+source. The cursor agent-context menu is intentionally outside this update.
+
+The voice adapter passed status classification and an isolated UNIX-socket check
+covering disabled integration access, mode changes, chat selection/disconnect and
+the recent-chat list. A disposable-home installer check passed: missing patched
+Quickshell fails before moving config, publication policy files are excluded,
+existing local exceptions/integration flags survive repeated installation and
+private backups remain. The broader installer fixture was updated for the new
+private-shell prerequisite; it was not rerun here.
+
+The Quickshell notification patch applies to pinned `1a4716cd`. The crop, media
+and fullscreen-output engine patches apply in recipe order to `b016d7d1`.
+These checks use disposable source files, leaving active checkouts/installations
+alone. Source and staged-blob privacy checks cover the publication; account state,
+voice backend files, selected chats, wallpaper selections and runtime JSON are not
+exported. No new build, installer run over the live desktop, GUI, sound, lock or
+hardware voice test was performed. Published build recipes require independent
+build/runtime acceptance on the installing user's Qt/GPU environment.
+
 ## 2026-11-09 window management and frozen screenshots
 
 The source update carries the installed window-size restoration, resizable grid,

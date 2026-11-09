@@ -69,6 +69,8 @@ Do not run the user installer below with sudo.
 ```bash
 # Back in the kisa-stack root:
 ./dotfiles/scripts/build-walker.sh
+./dotfiles/scripts/build-quickshell.sh
+# Review and run the exact `cmake --install ...` command printed above.
 ./dotfiles/scripts/build-shaders.sh
 ```
 
@@ -76,6 +78,15 @@ Walker is fetched at an exact revision, patched, built with `--locked`, then ins
 as `~/.local/bin/walker-shoji`. An existing binary is backed up. The retained checkout
 contains the complete modified GPL source; the patch is in `patches/walker/`.
 The script does not change a system Walker binary or start a GUI.
+
+Quickshell is built from the pin in `sources.json` with the notification inhibition/
+exception patch. Its printed install command uses the user-private prefix
+`${XDG_DATA_HOME:-$HOME/.local/share}/shoji-shell/quickshell`; system Quickshell is
+not replaced. Rebuild it after updating Qt because it uses private Qt APIs.
+The desktop installer rejects a missing private binary before moving any config.
+For another compatible patched build, set `SHOJI_QUICKSHELL` to its executable
+both while installing and in the installed `integrations.env`.
+See [notification setup](notifications.md) for behaviour and dependencies.
 
 The shader script compiles every `.frag` into a matching `.frag.qsb` beside its source.
 These generated files are ignored by Git but copied during installation. The

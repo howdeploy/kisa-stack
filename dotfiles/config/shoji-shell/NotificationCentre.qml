@@ -16,13 +16,13 @@ ColumnLayout {
             ColumnLayout {
                 Layout.fillWidth: true; spacing: 4
                 UiText { text: "Не беспокоить"; font.weight: Font.Medium; color: Theme.ink; Layout.fillWidth: true }
-                UiText { text: Notifications.quiet ? "Без всплывающих сообщений" : "Показывать новые сообщения"; font.pixelSize: 10; color: Theme.muted; Layout.fillWidth: true }
+                UiText { text: Notifications.quiet ? "Уведомления выключены · кроме исключений" : "Уведомления включены"; font.pixelSize: 10; color: Theme.muted; Layout.fillWidth: true; wrapMode: Text.Wrap }
             }
             Switch {
                 id: quietSwitch
                 checked: Notifications.quiet
                 Accessible.name: "Не беспокоить"
-                onToggled: Notifications.quiet = checked
+                onToggled: Notifications.setQuiet(checked)
                 padding: 0
                 indicator: Rectangle {
                     implicitWidth: 38; implicitHeight: 22; radius: 7

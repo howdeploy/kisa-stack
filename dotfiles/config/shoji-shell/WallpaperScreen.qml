@@ -57,6 +57,7 @@ Scope {
             Region { item: sessionsLoader.active && sessionsLoader.enabled ? sessionsLoader : null }
             Region { item: nekoLoader.active && nekoLoader.enabled ? nekoLoader : null }
             Region { item: homeLoader.active && homeLoader.enabled ? homeLoader : null }
+            Region { item: voiceLoader.active && voiceLoader.enabled ? voiceLoader : null }
         }
         WidgetWaveLoader {
             id: homeLoader
@@ -77,6 +78,11 @@ Scope {
             id: limitsLoader
             widgetId: "limits"; output: root.output; transition: wallpaperTransition
             sourceComponent: AiLimitsWidget {}
+        }
+        WidgetWaveLoader {
+            id: voiceLoader
+            widgetId: "voice"; output: root.output; transition: wallpaperTransition
+            sourceComponent: VoiceDesktopWidget { shell: root.shell; output: root.output }
         }
         WidgetWaveLoader {
             id: musicLoader

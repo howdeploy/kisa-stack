@@ -39,6 +39,10 @@ a remote image; browser integrations can download the image into a local cache.
 titles, account balances and provider output belong to the installing user.
 `system-settings.json` contains local device/display preferences and lock-wallpaper
 paths; it is ignored, excluded from source copies and preserved during upgrades. The
+same boundary applies to `notification-policy.json` and its chosen app exceptions.
+The voice adapter is disabled by default, uses a configurable local UNIX socket,
+and contains no selected chat, credentials, household address or device identifier.
+Chat titles and service telemetry received after opt-in stay local at runtime. The
 installer keeps live configuration outside the repository. It backs up replaced
 directories privately and never uploads their contents. Do not publish those backups.
 

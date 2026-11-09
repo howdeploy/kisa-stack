@@ -69,6 +69,9 @@ def main():
     if missing:
         parser.error("Missing desktop commands: " + ", ".join(missing) + "; see docs/install.md")
     if "shoji-shell" in selected:
+        shell_binary = Path(os.environ.get("SHOJI_QUICKSHELL") or data / "shoji-shell/quickshell/bin/quickshell")
+        if not shell_binary.is_file() or not os.access(shell_binary, os.X_OK):
+            parser.error("Missing patched Quickshell; build/install scripts/build-quickshell.sh first (or set SHOJI_QUICKSHELL)")
         for module in ("numpy", "PIL"):
             if importlib.util.find_spec(module) is None:
                 parser.error(f"Missing Python module: {module}; see dependencies/arch.txt")
@@ -116,14 +119,14 @@ def main():
         dst.parent.mkdir(parents=True, exist_ok=True)
         try:
             if src.is_dir():
-                shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "integrations.env", "wallpapers.json", "system-settings.json", "node_modules"))
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "integrations.env", "wallpapers.json", "system-settings.json", "notification-policy.json", "node_modules"))
             else:
                 shutil.copy2(src, dst)
             if dst == config / "shojiwm":
                 dst.joinpath("node_modules").mkdir()
                 dst.joinpath("node_modules/shoji_wm").symlink_to("/usr/lib/shojiwm/packages/shoji_wm", target_is_directory=True)
             if dst == config / "shoji-shell" and previous.is_dir():
-                for name in ("integrations.env", "wallpapers.json", "system-settings.json"):
+                for name in ("integrations.env", "wallpapers.json", "system-settings.json", "notification-policy.json"):
                     old = previous / name
                     if old.is_file() and not old.is_symlink():
                         shutil.copy2(old, dst / name)
